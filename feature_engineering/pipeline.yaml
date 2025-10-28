@@ -1,0 +1,216 @@
+# NBA PRA Feature Engineering Pipeline Configuration
+# Version: 1.0.0
+# Description: Automated orchestration of all feature engineering steps
+
+metadata:
+  name: "NBA PRA Feature Engineering"
+  description: "Generates 134+ features for NBA player PRA prediction"
+  version: "1.0.0"
+  author: "diyagamah"
+
+# Global configuration
+config:
+  # Execution behavior
+  fail_fast: true  # Stop on first error
+  execution_mode: "sequential"  # sequential or parallel
+  max_parallel_jobs: 6  # Used if execution_mode is parallel
+
+  # Logging
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_dir: "../logs"
+  log_to_console: true
+  log_to_file: true
+
+  # State management
+  state_file: "../.pipeline_state.json"
+  enable_resume: true  # Allow --skip-completed flag
+
+# Pipeline stages
+stages:
+  # Stage 1: Data Collection (OPTIONAL - usually pre-run)
+  - name: "data_loader"
+    script: "data_loader.py"
+    description: "Fetch NBA API data and load CleaningTheGlass files"
+
+    enabled: false  # Set to true to include in pipeline
+
+    outputs:
+      - "../data/nba_api/player_games.parquet"
+
+    critical: true
+    estimated_duration: "6-8 hours (full) or 2-5 minutes (sample)"
+
+    notes: |
+      This step takes 6-8 hours for full dataset due to NBA API rate limiting.
+      Usually run separately. Set SAMPLE_SIZE=10 in script for testing.
+
+  # Stage 2-7: Feature Generation (Can run in parallel)
+  - name: "rolling_features"
+    script: "rolling_features.py"
+    description: "Calculate rolling averages, EWMA, trends, volatility"
+
+    depends_on:
+      - "../data/nba_api/player_games.parquet"
+
+    outputs:
+      - "../data/feature_tables/rolling_features.parquet"
+
+    validation:
+      check_no_leakage: true
+      check_output_exists: true
+
+    estimated_duration: "2-5 minutes"
+
+  - name: "matchup_features"
+    script: "matchup_features.py"
+    description: "Generate opponent defensive stats and head-to-head history"
+
+    depends_on:
+      - "../data/nba_api/player_games.parquet"
+
+    outputs:
+      - "../data/feature_tables/matchup_features.parquet"
+
+    validation:
+      check_output_exists: true
+
+    estimated_duration: "3-7 minutes"
+
+  - name: "contextual_features"
+    script: "contextual_features.py"
+    description: "Game context features (home/away, rest, season timing)"
+
+    depends_on:
+      - "../data/nba_api/player_games.parquet"
+
+    outputs:
+      - "../data/feature_tables/contextual_features.parquet"
+
+    validation:
+      check_output_exists: true
+
+    estimated_duration: "2-4 minutes"
+
+  - name: "advanced_metrics"
+    script: "advanced_metrics.py"
+    description: "CTG advanced statistics (usage, efficiency, playmaking)"
+
+    depends_on:
+      - "../data/nba_api/player_games.parquet"
+
+    outputs:
+      - "../data/feature_tables/advanced_metrics.parquet"
+
+    continue_on_error: false  # CTG data might be missing
+
+    validation:
+      check_output_exists: true
+      allow_high_missing: true  # CTG data may be incomplete
+
+    estimated_duration: "3-6 minutes"
+
+    notes: |
+      Requires CleaningTheGlass CSV files in data/ctg_data_organized/.
+      Will create placeholder features if CTG data missing.
+
+  - name: "position_features"
+    script: "position_features.py"
+    description: "Position-normalized PRA and percentile rankings"
+
+    depends_on:
+      - "../data/nba_api/player_games.parquet"
+
+    outputs:
+      - "../data/feature_tables/position_features.parquet"
+
+    validation:
+      check_output_exists: true
+
+    estimated_duration: "2-4 minutes"
+    expected_improvement: "3-5% RMSE reduction"
+    priority: "HIGH IMPACT"
+
+  - name: "injury_features"
+    script: "injury_features.py"
+    description: "Injury return tracking and load management indicators"
+
+    depends_on:
+      - "../data/nba_api/player_games.parquet"
+
+    outputs:
+      - "../data/feature_tables/injury_features.parquet"
+
+    validation:
+      check_output_exists: true
+
+    estimated_duration: "2-5 minutes"
+    expected_improvement: "4-6% RMSE reduction"
+    priority: "HIGH IMPACT"
+
+  # Stage 8: Feature Integration
+  - name: "build_features"
+    script: "build_features.py"
+    description: "Join all feature tables into master feature matrix"
+
+    depends_on:
+      - "../data/feature_tables/rolling_features.parquet"
+      - "../data/feature_tables/matchup_features.parquet"
+      - "../data/feature_tables/contextual_features.parquet"
+      - "../data/feature_tables/advanced_metrics.parquet"
+      - "../data/feature_tables/position_features.parquet"
+      - "../data/feature_tables/injury_features.parquet"
+
+    outputs:
+      - "../data/feature_tables/master_features.parquet"
+
+    critical: true
+
+    validation:
+      check_grain_uniqueness: true
+      check_no_duplicates: true
+      required_columns: ["player_id", "game_id", "game_date", "target_pra"]
+
+    estimated_duration: "1-3 minutes"
+
+  # Stage 9: Validation (MANDATORY)
+  - name: "validate_features"
+    script: "validate_features.py"
+    description: "Comprehensive validation for data quality and leakage"
+
+    depends_on:
+      - "../data/feature_tables/master_features.parquet"
+
+    critical: true  # Pipeline fails if validation fails
+
+    validation:
+      fail_on_leakage: true
+      fail_on_duplicates: true
+      fail_on_excessive_nulls: false  # Warning only
+
+    estimated_duration: "1-2 minutes"
+
+# Optional: Parallel execution groups
+# Uncomment to enable parallel feature generation
+parallel_groups:
+  feature_generation:
+    enabled: false  # Set to true to run features in parallel
+    stages:
+      - rolling_features
+      - matchup_features
+      - contextual_features
+      - advanced_metrics
+      - position_features
+      - injury_features
+
+    on_failure: "stop_all"  # Options: stop_all, continue_others
+    required_successes: "all"  # Options: all, any, number (e.g., 5)
+
+# Monitoring
+monitoring:
+  track_duration: true
+  track_memory_usage: false  # Requires psutil
+  track_output_sizes: true
+
+  alerts:
+    slow_execution_threshold: 1.5  # Alert if >1.5x estimated duration
+    missing_output: "fail"  # fail, warn, or ignore
