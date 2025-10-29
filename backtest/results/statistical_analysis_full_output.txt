@@ -1,0 +1,276 @@
+================================================================================
+NBA PRA BACKTEST - COMPREHENSIVE STATISTICAL ANALYSIS
+================================================================================
+
+Dataset Overview:
+  Total Bets: 3,813
+  Wins: 2,949
+  Losses: 864
+  Win Rate: 0.7734 (77.34%)
+  Break-even Rate: 0.5240 (52.40%)
+  ROI: 0.4764 (47.64%)
+  Total Profit: 1816.64 units
+
+================================================================================
+1. STATISTICAL SIGNIFICANCE TESTING
+================================================================================
+
+1.1 Binomial Test: Win Rate vs Break-Even
+------------------------------------------------------------
+  H0: True win rate = 0.5240 (break-even)
+  H1: True win rate > 0.5240
+  Observed wins: 2949 out of 3813
+  Expected wins (under H0): 1998.0
+  p-value: 1.86e-222
+  Result: HIGHLY SIGNIFICANT (p < 0.001) ***
+  The win rate is statistically different from break-even.
+  Z-score: 30.8370
+
+1.2 Confidence Intervals for Win Rate
+------------------------------------------------------------
+  Observed Win Rate: 0.7734 (77.34%)
+  90% Confidence Interval: [0.7621, 0.7844] (76.21%, 78.44%)
+  95% Confidence Interval: [0.7598, 0.7864] (75.98%, 78.64%)
+  99% Confidence Interval: [0.7555, 0.7904] (75.55%, 79.04%)
+  Break-even Rate: 0.5240 (52.40%)
+  Result: Lower bound of 95% CI (75.98%) EXCEEDS break-even (52.40%)
+  This suggests a robust and statistically significant edge.
+
+1.3 One-Sample T-Test: Profit per Bet
+------------------------------------------------------------
+  H0: Mean profit per bet = 0 (no edge)
+  H1: Mean profit per bet ≠ 0
+  Sample size: 3,813
+  Mean profit per bet: 0.4764 units
+  Std dev: 0.7993 units
+  Standard error: 0.0129 units
+  t-statistic: 36.8083
+  p-value: 4.69e-254
+  Result: HIGHLY SIGNIFICANT (p < 0.001) ***
+  95% CI for mean profit: [0.4511, 0.5018] units
+
+================================================================================
+2. OVERFITTING AND SELECTION BIAS ANALYSIS
+================================================================================
+
+2.1 Temporal Stability: Win Rate Over Time
+------------------------------------------------------------
+  Early Period (Days 1-27):
+    Bets: 1084, Wins: 868, Win Rate: 0.8007, ROI: 0.5286
+  Middle Period (Days 28-54):
+    Bets: 1094, Wins: 845, Win Rate: 0.7724, ROI: 0.4745
+  Late Period (Days 55-83):
+    Bets: 1635, Wins: 1236, Win Rate: 0.7560, ROI: 0.4431
+
+  Chi-square test for temporal homogeneity:
+    H0: Win rates are equal across all periods
+    Chi-square statistic: 7.4657
+    p-value: 0.0239
+    Result: SIGNIFICANT difference between periods (p < 0.05)
+    WARNING: Win rate is not stable over time - possible overfitting or regime change
+  Win Rate Trend: -0.0448 (-4.48%)
+    Interpretation: Stable (< 5% change)
+
+2.2 Rolling Window Analysis (30-day windows)
+------------------------------------------------------------
+  30-day rolling win rate statistics:
+    Mean: 0.7757
+    Std: 0.0112
+    Min: 0.7564
+    25th percentile: 0.7662
+    Median: 0.7732
+    75th percentile: 0.7854
+    Max: 0.7971
+  Percentage of 30-day windows above break-even: 100.00%
+    Interpretation: EXCELLENT consistency (>90% of windows profitable)
+
+2.3 Player-Level Sample Size Distribution
+------------------------------------------------------------
+  Total unique players: 162
+  Games per player:
+    Mean: 17.4
+    Median: 16.0
+    Min: 10
+    Max: 35
+  Players with < 10 bets: 0 (0.0%)
+  Players with >= 20 bets: 53 (32.7%)
+  Average win rate for players with < 15 bets: 0.7968
+  Average win rate for players with >= 15 bets: 0.7626
+  No significant sample size bias detected
+
+================================================================================
+3. VARIANCE ANALYSIS AND RISK ASSESSMENT
+================================================================================
+
+3.1 Profit Distribution Analysis
+------------------------------------------------------------
+  Profit per bet distribution:
+    Mean: 0.4764 units
+    Std: 0.7993 units
+    Skewness: -1.3062
+    Kurtosis: -0.2938
+    Min: -1.0000 units
+    Max: 0.9090 units
+  Sharpe Ratio: 0.5961
+    Interpretation: Good risk-adjusted returns
+
+3.2 Drawdown Analysis
+------------------------------------------------------------
+  Maximum Drawdown: 0.00 units (0.00%)
+  Final Profit: 1816.64 units
+  Profit-to-Drawdown Ratio: N/A
+    Interpretation: CONCERNING - drawdown comparable to total profit
+  Percentage of time in drawdown: 0.0%
+
+3.3 Kelly Criterion (Optimal Bet Sizing)
+------------------------------------------------------------
+  Win probability: 0.7734
+  Odds received (b): 0.9090
+  Kelly fraction: 0.5241 (52.41% of bankroll)
+  Recommendation: Consider FRACTIONAL KELLY (1/4 or 1/2 Kelly) = 0.1310 or 0.2621
+    Full Kelly is aggressive and may lead to large drawdowns
+  Expected growth rate per bet: 0.1331 (13.31%)
+
+================================================================================
+4. EDGE ANALYSIS VALIDATION
+================================================================================
+
+4.1 Edge Stratification Analysis
+------------------------------------------------------------
+
+  Small (1+ pts):
+    Bets: 3281
+    Win Rate: 0.8059 (80.59%)
+    ROI: 0.5384 (53.84%)
+    p-value vs break-even: 1.77e-248
+    Result: HIGHLY SIGNIFICANT ***
+    95% CI: [0.7920, 0.8190]
+
+  Medium (2+ pts):
+    Bets: 2709
+    Win Rate: 0.8439 (84.39%)
+    ROI: 0.6109 (61.09%)
+    p-value vs break-even: 1.35e-270
+    Result: HIGHLY SIGNIFICANT ***
+    95% CI: [0.8297, 0.8570]
+
+  Large (3+ pts):
+    Bets: 2203
+    Win Rate: 0.8724 (87.24%)
+    ROI: 0.6655 (66.55%)
+    p-value vs break-even: 4.41e-267
+    Result: HIGHLY SIGNIFICANT ***
+    95% CI: [0.8579, 0.8857]
+
+4.2 Edge Monotonicity Test
+------------------------------------------------------------
+  Win rates by edge size:
+    Small (1+ pts): 0.8059
+    Medium (2+ pts): 0.8439
+    Large (3+ pts): 0.8724
+  Result: WIN RATES ARE MONOTONICALLY INCREASING
+  Interpretation: Edge calibration is correct - larger edges = higher win rates
+  Correlation between edge size and profit: 0.2876
+    Interpretation: Positive correlation - larger edges tend to be more profitable
+
+================================================================================
+5. PLAYER-LEVEL DISTRIBUTION ANALYSIS
+================================================================================
+
+5.1 Player Win Rate Distribution
+------------------------------------------------------------
+  Win Rate Distribution:
+    Mean: 0.7772
+    Median: 0.7857
+    Std: 0.1135
+    Min: 0.4706
+    Max: 1.0000
+  Players with 100% win rate: 7
+  Players with win rate > 90%: 23
+  Players with win rate > break-even: 159 (98.1%)
+  Players with win rate < break-even: 3 (1.9%)
+
+5.2 Small Sample Bias Detection
+------------------------------------------------------------
+  Players with 100% win rate and < 15 bets: 6
+  Total bets from these players: 65 (170.5% of all bets)
+  These players represent a small fraction - limited impact on overall results
+
+5.3 Player-Level Aggregation
+------------------------------------------------------------
+  Unweighted mean player win rate: 0.7772
+  Bet-weighted win rate: 0.7734
+  Difference: -0.0038
+  Results are consistent across player volumes - no strong bias detected
+
+================================================================================
+6. RED FLAGS AND SUSTAINABILITY CONCERNS
+================================================================================
+
+WARNINGS (Monitor Closely):
+  1. Win rate exceeds 75% - monitor for regression to mean
+
+POSITIVE INDICATORS:
+  1. Sample size (3,813 bets) is adequate for statistical testing
+  2. Win rate is temporally stable
+  3. 95% CI lower bound exceeds break-even - robust statistical edge
+  4. Edge categories show monotonic win rate increase - well-calibrated
+  5. 100.0% of 30-day windows are profitable - high consistency
+  6. Drawdown is well-controlled relative to total profit
+
+================================================================================
+7. FINAL ASSESSMENT AND RECOMMENDATIONS
+================================================================================
+
+7.1 Overall Sustainability Assessment
+------------------------------------------------------------
+  Sustainability Score: 90/100
+
+  Rating: EXCELLENT - Highly sustainable edge with robust statistical support
+  Confidence: HIGH
+
+7.2 Key Recommendations
+------------------------------------------------------------
+  1. Statistical Validation:
+     - Continue tracking performance to increase sample size beyond 3,813 bets
+     - Target: 5,000+ bets for high confidence in edge estimation
+     - Monitor rolling 30-day win rate and stop if consistently below 52.4%
+
+  2. Risk Management:
+     - Use fractional Kelly sizing: recommend 1/4 Kelly = 0.1310 of bankroll
+     - Set stop-loss at 0 units (1.5x historical max drawdown)
+     - Track daily/weekly performance and investigate if win rate drops below 76.0%
+
+  3. Edge Optimization:
+     - Focus on large edge opportunities (3+ points): 87.2% win rate
+     - Consider filtering out small edges if ROI improves
+     - Validate edge calibration: does predicted edge correlate with actual results?
+
+  4. Monitoring Protocol:
+     - Weekly: Calculate 7-day win rate and compare to 52.4% break-even
+     - Monthly: Recalculate 95% CI and verify lower bound > 52.4%
+     - Quarterly: Perform temporal stability analysis (compare latest 3 months to previous)
+     - Annual: Re-train model and validate on out-of-sample data
+
+  5. Red Flags to Watch:
+     - Win rate drops below 76.0% for 2+ consecutive weeks
+     - 30-day rolling win rate drops below 52.4%
+     - Drawdown exceeds 0 units (2x historical max)
+     - Sharp changes in win rate across time periods (>10% change)
+
+7.3 Final Verdict
+------------------------------------------------------------
+  VERDICT: The backtest results are STATISTICALLY SIGNIFICANT and show
+  evidence of a sustainable edge. The win rate is robust, temporally stable,
+  and well above break-even with high confidence.
+
+  However, continue to monitor performance closely as:
+  - The win rate of 77.3% is exceptionally high
+  - Real-world conditions may differ from backtest assumptions
+  - Regression to mean is expected over longer time periods
+
+================================================================================
+END OF STATISTICAL ANALYSIS
+================================================================================
+
+Summary saved to: /Users/diyagamah/Documents/NBA_PRA/backtest/results/statistical_analysis_summary.txt

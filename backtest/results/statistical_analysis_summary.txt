@@ -1,0 +1,20 @@
+================================================================================
+NBA PRA BACKTEST - STATISTICAL ANALYSIS SUMMARY
+================================================================================
+
+Overall Results:
+  Total Bets: 3,813
+  Win Rate: 0.7734 (77.34%)
+  ROI: 0.4764 (47.64%)
+  Total Profit: 1816.64 units
+
+Statistical Significance:
+  Binomial test p-value: 1.86e-222
+  95% CI: [75.98%, 78.64%]
+  Lower bound vs break-even: 75.98% vs 52.40%
+
+Sustainability Score: 90/100
+
+Warnings:
+  - Win rate exceeds 75% - monitor for regression to mean
+

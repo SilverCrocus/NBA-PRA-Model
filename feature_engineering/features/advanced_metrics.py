@@ -27,6 +27,11 @@ from feature_engineering.utils import (convert_minutes_to_float, create_feature_
 from feature_engineering.config import (FEATURE_DIR, CTG_SEASON_MAPPING, HIGH_USAGE_THRESHOLD,
                     LOW_USAGE_THRESHOLD, PRIMARY_PLAYMAKER_THRESHOLD,
                     THREE_POINT_SPECIALIST_THRESHOLD)
+from feature_engineering.features.ctg_imputation import (
+    create_imputation_flags,
+    create_position_relative_features,
+    calculate_position_baselines
+)
 
 
 def load_and_merge_ctg_data(player_games_df: pd.DataFrame) -> pd.DataFrame:
@@ -62,6 +67,13 @@ def load_and_merge_ctg_data(player_games_df: pd.DataFrame) -> pd.DataFrame:
     # Clean CTG player names for matching
     ctg_data['player'] = ctg_data['player'].str.strip()
 
+    # Extract position from CTG data (Pos column)
+    # Position is available in CTG offensive overview
+    if 'Pos' in ctg_data.columns:
+        logger.info(f"  Found position data in CTG: {ctg_data['Pos'].nunique()} unique positions")
+    else:
+        logger.warning("  No position column found in CTG data")
+
     # Map current season to previous season for CTG lookup
     # Using imported CTG_SEASON_MAPPING from config
     player_games_df['previous_season'] = player_games_df['season'].map(CTG_SEASON_MAPPING)
@@ -74,6 +86,11 @@ def load_and_merge_ctg_data(player_games_df: pd.DataFrame) -> pd.DataFrame:
         how='left',
         suffixes=('', '_ctg')
     )
+
+    # Rename CTG position column if it exists
+    if 'Pos' in merged.columns:
+        merged = merged.rename(columns={'Pos': 'position'})
+        logger.info(f"  Extracted position for {(~merged['position'].isna()).sum()} games")
 
     # Drop temporary column
     merged = merged.drop(columns=['previous_season'], errors='ignore')
@@ -396,6 +413,50 @@ def build_advanced_metrics() -> pd.DataFrame:
         )
 
     logger.info(f"Created {len(features.columns) - 3} advanced metrics features")
+
+    # NEW: Add imputation features
+    logger.info("\nCreating imputation features...")
+
+    # Step 1: Create imputation flags (track what was missing)
+    logger.info("  Creating imputation flags...")
+    imputation_flags = create_imputation_flags(df_with_ctg)
+
+    # Step 2: Calculate position baselines from ALL data
+    # Note: In walk-forward backtest, this will be calculated per-fold from training data only
+    logger.info("  Calculating position baselines...")
+    if 'position' in df_with_ctg.columns:
+        position_baselines = calculate_position_baselines(df_with_ctg)
+
+        # Step 3: Create position-relative features
+        logger.info("  Creating position-relative features...")
+        position_relative = create_position_relative_features(df_with_ctg, position_baselines)
+
+        # Merge new features
+        features = features.merge(
+            imputation_flags,
+            on=['player_id', 'game_id', 'game_date'],
+            how='left'
+        )
+
+        features = features.merge(
+            position_relative,
+            on=['player_id', 'game_id', 'game_date'],
+            how='left'
+        )
+
+        logger.info(f"  Added {len(imputation_flags.columns) - 3} imputation flags")
+        logger.info(f"  Added {len(position_relative.columns) - 3} position-relative features")
+    else:
+        logger.warning("  No position data available, skipping position-relative features")
+        # Still add imputation flags
+        features = features.merge(
+            imputation_flags,
+            on=['player_id', 'game_id', 'game_date'],
+            how='left'
+        )
+        logger.info(f"  Added {len(imputation_flags.columns) - 3} imputation flags")
+
+    logger.info(f"\nTotal features created: {len(features.columns) - 3}")
 
     # Validate
     logger.info("\nValidating advanced metrics...")
