@@ -5,19 +5,38 @@ Integrates CleaningTheGlass (CTG) advanced statistics
 These metrics provide deeper insights into player efficiency and role
 """
 
+# Add project root to path when running as script
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+    project_root = Path(__file__).parent.parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 import numpy as np
 from pathlib import Path
-from data_loader import load_player_gamelogs, consolidate_ctg_data_all_seasons, load_ctg_player_data
+from feature_engineering.data_loader import load_player_gamelogs, consolidate_ctg_data_all_seasons, load_ctg_player_data
 
-# Output directory
-FEATURE_DIR = Path(__file__).parent.parent / "data" / "feature_tables"
-FEATURE_DIR.mkdir(parents=True, exist_ok=True)
+# Import shared utilities and configuration
+from feature_engineering.utils import (convert_minutes_to_float, create_feature_base,
+                   validate_not_empty, validate_required_columns)
+from feature_engineering.config import (FEATURE_DIR, CTG_SEASON_MAPPING, HIGH_USAGE_THRESHOLD,
+                    LOW_USAGE_THRESHOLD, PRIMARY_PLAYMAKER_THRESHOLD,
+                    THREE_POINT_SPECIALIST_THRESHOLD)
 
 
-def load_and_merge_ctg_data(player_games_df):
+def load_and_merge_ctg_data(player_games_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Load CTG data and merge with player games
+    Load CTG data and merge with player games using PREVIOUS season's data
+    to prevent temporal leakage.
+
+    CTG data contains season-level aggregates. Using current season's data would
+    include information from future games. Instead, we use the previous season's
+    stats as a proxy for player ability/role.
 
     Args:
         player_games_df: Player game logs from NBA API
@@ -25,29 +44,46 @@ def load_and_merge_ctg_data(player_games_df):
     Returns:
         DataFrame with CTG metrics merged
     """
-    print("Loading CTG offensive overview data...")
+    # Input validation
+    validate_not_empty(player_games_df, 'load_and_merge_ctg_data')
+    validate_required_columns(
+        player_games_df,
+        ['player_id', 'game_id', 'game_date', 'season', 'player_name'],
+        'load_and_merge_ctg_data'
+    )
+
+    logger.info("Loading CTG offensive overview data...")
     ctg_data = consolidate_ctg_data_all_seasons()
 
     if ctg_data.empty:
-        print("Warning: No CTG data found. Creating placeholder features.")
+        logger.warning("Warning: No CTG data found. Creating placeholder features.")
         return player_games_df
 
     # Clean CTG player names for matching
     ctg_data['player'] = ctg_data['player'].str.strip()
 
-    # Merge on player name and season
-    # Note: This is season-level data, so same values for all games in a season
+    # Map current season to previous season for CTG lookup
+    # Using imported CTG_SEASON_MAPPING from config
+    player_games_df['previous_season'] = player_games_df['season'].map(CTG_SEASON_MAPPING)
+
+    # Merge using PREVIOUS season's CTG data
     merged = player_games_df.merge(
         ctg_data,
-        left_on=['player_name', 'season'],
+        left_on=['player_name', 'previous_season'],
         right_on=['player', 'season'],
-        how='left'
+        how='left',
+        suffixes=('', '_ctg')
     )
+
+    # Drop temporary column
+    merged = merged.drop(columns=['previous_season'], errors='ignore')
+
+    logger.info(f"  Merged CTG data: {(~merged['usage'].isna()).sum() if 'usage' in merged.columns else 0} games with CTG stats")
 
     return merged
 
 
-def create_usage_features(df):
+def create_usage_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create usage rate and related features from CTG data
 
@@ -57,6 +93,14 @@ def create_usage_features(df):
     Returns:
         DataFrame with usage features
     """
+    # Input validation
+    validate_not_empty(df, 'create_usage_features')
+    validate_required_columns(
+        df,
+        ['player_id', 'game_id', 'game_date'],
+        'create_usage_features'
+    )
+
     features = df[['player_id', 'game_id', 'game_date']].copy()
 
     # Usage Rate (percentage of team possessions used)
@@ -78,7 +122,7 @@ def create_usage_features(df):
     return features
 
 
-def create_playmaking_features(df):
+def create_playmaking_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create assist and playmaking features from CTG data
 
@@ -88,6 +132,14 @@ def create_playmaking_features(df):
     Returns:
         DataFrame with playmaking features
     """
+    # Input validation
+    validate_not_empty(df, 'create_playmaking_features')
+    validate_required_columns(
+        df,
+        ['player_id', 'game_id', 'game_date'],
+        'create_playmaking_features'
+    )
+
     features = df[['player_id', 'game_id', 'game_date']].copy()
 
     # Assist percentage
@@ -115,7 +167,7 @@ def create_playmaking_features(df):
     return features
 
 
-def create_efficiency_features(df):
+def create_efficiency_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create shooting efficiency features
 
@@ -125,6 +177,14 @@ def create_efficiency_features(df):
     Returns:
         DataFrame with efficiency features
     """
+    # Input validation
+    validate_not_empty(df, 'create_efficiency_features')
+    validate_required_columns(
+        df,
+        ['player_id', 'game_id', 'game_date'],
+        'create_efficiency_features'
+    )
+
     features = df[['player_id', 'game_id', 'game_date']].copy()
 
     # Effective field goal percentage
@@ -149,7 +209,7 @@ def create_efficiency_features(df):
     return features
 
 
-def create_rebounding_features(df):
+def create_rebounding_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create rebounding features from CTG data
 
@@ -159,6 +219,14 @@ def create_rebounding_features(df):
     Returns:
         DataFrame with rebounding features
     """
+    # Input validation
+    validate_not_empty(df, 'create_rebounding_features')
+    validate_required_columns(
+        df,
+        ['player_id', 'game_id', 'game_date'],
+        'create_rebounding_features'
+    )
+
     features = df[['player_id', 'game_id', 'game_date']].copy()
 
     # Raw rebounds from box score
@@ -175,7 +243,7 @@ def create_rebounding_features(df):
     return features
 
 
-def create_defense_features(df):
+def create_defense_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create defensive features from box score
 
@@ -185,6 +253,14 @@ def create_defense_features(df):
     Returns:
         DataFrame with defensive features
     """
+    # Input validation
+    validate_not_empty(df, 'create_defense_features')
+    validate_required_columns(
+        df,
+        ['player_id', 'game_id', 'game_date'],
+        'create_defense_features'
+    )
+
     features = df[['player_id', 'game_id', 'game_date']].copy()
 
     # Defensive stats from box score
@@ -207,7 +283,7 @@ def create_defense_features(df):
     return features
 
 
-def create_role_indicators(df):
+def create_role_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create indicators for player role based on stats
 
@@ -217,54 +293,44 @@ def create_role_indicators(df):
     Returns:
         DataFrame with role indicators
     """
+    # Input validation
+    validate_not_empty(df, 'create_role_indicators')
+    validate_required_columns(
+        df,
+        ['player_id', 'game_id', 'game_date'],
+        'create_role_indicators'
+    )
+
     features = df[['player_id', 'game_id', 'game_date']].copy()
 
     # Calculate role indicators from recent games
-    # Group by player and calculate rolling averages (season-based)
+    # Using imported thresholds from config
 
     # High usage player (star/primary option)
     if 'usage' in df.columns:
-        features['is_high_usage'] = (df['usage'] >= 0.25).astype(int)
-        features['is_low_usage'] = (df['usage'] < 0.18).astype(int)
+        features['is_high_usage'] = (df['usage'] >= HIGH_USAGE_THRESHOLD).astype(int)
+        features['is_low_usage'] = (df['usage'] < LOW_USAGE_THRESHOLD).astype(int)
     else:
         features['is_high_usage'] = 0
         features['is_low_usage'] = 0
 
     # Primary playmaker
     if 'ast%' in df.columns:
-        features['is_primary_playmaker'] = (df['ast%'] >= 0.25).astype(int)
+        features['is_primary_playmaker'] = (df['ast%'] >= PRIMARY_PLAYMAKER_THRESHOLD).astype(int)
     else:
         features['is_primary_playmaker'] = 0
 
     # Three-point specialist
     if 'fg3_attempted' in df.columns and 'fg_attempted' in df.columns:
         three_pt_rate = df['fg3_attempted'] / df['fg_attempted'].replace(0, np.nan)
-        features['is_three_point_specialist'] = (three_pt_rate >= 0.5).astype(int)
+        features['is_three_point_specialist'] = (three_pt_rate >= THREE_POINT_SPECIALIST_THRESHOLD).astype(int)
     else:
         features['is_three_point_specialist'] = 0
 
     return features
 
 
-def convert_minutes_to_float(minutes):
-    """Convert minutes to float"""
-    if pd.isna(minutes):
-        return 0.0
-    if isinstance(minutes, (int, float)):
-        return float(minutes)
-    if isinstance(minutes, str) and ':' in minutes:
-        try:
-            parts = minutes.split(':')
-            return float(parts[0]) + float(parts[1]) / 60
-        except:
-            return 0.0
-    try:
-        return float(minutes)
-    except:
-        return 0.0
-
-
-def validate_advanced_metrics(features_df):
+def validate_advanced_metrics(features_df: pd.DataFrame) -> None:
     """
     Validate advanced metrics features
 
@@ -283,40 +349,43 @@ def validate_advanced_metrics(features_df):
         if not np.isnan(ts_mean):
             assert 0.3 < ts_mean < 0.8, f"True shooting % mean unusual: {ts_mean}"
 
-    print("✓ Advanced metrics validation passed")
+    logger.info("✓ Advanced metrics validation passed")
 
 
-def build_advanced_metrics():
+def build_advanced_metrics() -> pd.DataFrame:
     """
     Main function to build all advanced metrics features
     """
-    print("Loading player game logs...")
+    logger.info("Loading player game logs...")
     df = load_player_gamelogs()
 
-    print(f"Loaded {len(df)} games for {df['player_id'].nunique()} players")
+    # Input validation
+    validate_not_empty(df, 'build_advanced_metrics')
 
-    print("\nMerging CTG data...")
+    logger.info(f"Loaded {len(df)} games for {df['player_id'].nunique()} players")
+
+    logger.info("\nMerging CTG data...")
     df_with_ctg = load_and_merge_ctg_data(df)
 
-    print("Creating usage features...")
+    logger.info("Creating usage features...")
     usage = create_usage_features(df_with_ctg)
 
-    print("Creating playmaking features...")
+    logger.info("Creating playmaking features...")
     playmaking = create_playmaking_features(df_with_ctg)
 
-    print("Creating efficiency features...")
+    logger.info("Creating efficiency features...")
     efficiency = create_efficiency_features(df_with_ctg)
 
-    print("Creating rebounding features...")
+    logger.info("Creating rebounding features...")
     rebounding = create_rebounding_features(df_with_ctg)
 
-    print("Creating defense features...")
+    logger.info("Creating defense features...")
     defense = create_defense_features(df_with_ctg)
 
-    print("Creating role indicators...")
+    logger.info("Creating role indicators...")
     roles = create_role_indicators(df_with_ctg)
 
-    print("\nMerging all advanced metrics features...")
+    logger.info("\nMerging all advanced metrics features...")
     features = usage.copy()
 
     for feature_df in [playmaking, efficiency, rebounding, defense, roles]:
@@ -326,19 +395,19 @@ def build_advanced_metrics():
             how='left'
         )
 
-    print(f"Created {len(features.columns) - 3} advanced metrics features")
+    logger.info(f"Created {len(features.columns) - 3} advanced metrics features")
 
     # Validate
-    print("\nValidating advanced metrics...")
+    logger.info("\nValidating advanced metrics...")
     validate_advanced_metrics(features)
 
     # Save
     output_path = FEATURE_DIR / "advanced_metrics.parquet"
     features.to_parquet(output_path, index=False)
 
-    print(f"\n✓ Saved advanced metrics to {output_path}")
-    print(f"  Shape: {features.shape}")
-    print(f"  Columns: {list(features.columns)}")
+    logger.info(f"\n✓ Saved advanced metrics to {output_path}")
+    logger.info(f"  Shape: {features.shape}")
+    logger.info(f"  Columns: {list(features.columns)}")
 
     return features
 

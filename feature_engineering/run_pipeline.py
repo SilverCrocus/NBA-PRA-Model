@@ -158,16 +158,17 @@ class PipelineExecutor:
         start_time = time.time()
 
         try:
-            # Build command
+            # Build command - run from project root for proper imports
+            project_root = self.script_dir.parent
             script_path = self.script_dir / script
             cmd = [sys.executable, str(script_path)]
 
-            # Execute
+            # Execute from project root so feature_engineering package imports work
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                cwd=self.script_dir
+                cwd=project_root
             )
 
             duration = time.time() - start_time
@@ -233,15 +234,16 @@ class PipelineExecutor:
                 'duration': duration
             }
 
-        except Exception as e:
+        except (subprocess.CalledProcessError, FileNotFoundError, ImportError, ValueError, KeyError) as e:
+            # Subprocess failed, module not found, or data validation error
             duration = time.time() - start_time
-            self.logger.error(f"❌ Stage {stage_name} raised exception: {e}")
+            self.logger.error(f"❌ Stage {stage_name} raised exception: {type(e).__name__}: {e}")
 
             self.state['stages'][stage_name] = {
                 'status': 'error',
                 'completed_at': datetime.now().isoformat(),
                 'duration_seconds': duration,
-                'error': str(e)
+                'error': f"{type(e).__name__}: {str(e)}"
             }
             self.save_state()
 
@@ -395,13 +397,14 @@ class PipelineExecutor:
 
             return all_success
 
-        except Exception as e:
+        except (subprocess.CalledProcessError, FileNotFoundError, ImportError, ValueError, KeyError, OSError) as e:
+            # Pipeline-level error - could be any stage failure
             pipeline_duration = time.time() - pipeline_start
             self.logger.error(f"\n❌ Pipeline FAILED after {pipeline_duration:.1f}s")
-            self.logger.error(f"Error: {e}")
+            self.logger.error(f"Error ({type(e).__name__}): {e}")
 
             self.state['last_run_complete'] = datetime.now().isoformat()
-            self.state['last_error'] = str(e)
+            self.state['last_error'] = f"{type(e).__name__}: {str(e)}"
             self.save_state()
 
             return False

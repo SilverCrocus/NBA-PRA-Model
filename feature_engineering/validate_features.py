@@ -6,36 +6,39 @@ Runs comprehensive checks on all feature engineering outputs
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 import sys
 
 PROJECT_ROOT = Path(__file__).parent.parent
 FEATURE_DIR = PROJECT_ROOT / "data" / "feature_tables"
 
 
-def check_file_exists(filename):
+def check_file_exists(filename: str) -> bool:
     """Check if feature file exists"""
     filepath = FEATURE_DIR / filename
     if not filepath.exists():
-        print(f"❌ {filename} not found")
+        logger.error(f"❌ {filename} not found")
         return False
-    print(f"✓ {filename} exists ({filepath.stat().st_size / 1024 / 1024:.1f} MB)")
+    logger.info(f"✓ {filename} exists ({filepath.stat().st_size / 1024 / 1024:.1f} MB)")
     return True
 
 
-def check_grain_uniqueness(df, filename):
+def check_grain_uniqueness(df: pd.DataFrame, filename: str) -> bool:
     """Check that grain is unique (no duplicates)"""
     grain_cols = ['player_id', 'game_id', 'game_date']
 
     duplicates = df.duplicated(subset=grain_cols).sum()
 
     if duplicates > 0:
-        print(f"  ❌ CRITICAL: {duplicates} duplicate rows on grain!")
+        logger.error(f"  ❌ CRITICAL: {duplicates} duplicate rows on grain!")
         return False
-    print(f"  ✓ Grain is unique ({len(df):,} rows)")
+    logger.info(f"  ✓ Grain is unique ({len(df):,} rows)")
     return True
 
 
-def check_temporal_leakage(df, filename):
+def check_temporal_leakage(df: pd.DataFrame, filename: str) -> bool:
     """Check for potential temporal leakage"""
     issues = []
 
@@ -50,14 +53,14 @@ def check_temporal_leakage(df, filename):
         issues.append(f"Suspicious column names: {suspicious_cols}")
 
     if issues:
-        print(f"  ⚠️  Potential leakage issues: {', '.join(issues)}")
+        logger.warning(f"  ⚠️  Potential leakage issues: {', '.join(issues)}")
         return False
 
-    print(f"  ✓ No obvious leakage detected")
+    logger.info(f"  ✓ No obvious leakage detected")
     return True
 
 
-def check_missing_values(df, filename):
+def check_missing_values(df: pd.DataFrame, filename: str) -> bool:
     """Check missing value patterns"""
     missing = df.isnull().sum()
     missing_pct = (missing / len(df) * 100)
@@ -65,16 +68,16 @@ def check_missing_values(df, filename):
     high_missing = missing_pct[missing_pct > 50]
 
     if len(high_missing) > 0:
-        print(f"  ⚠️  {len(high_missing)} columns with >50% missing:")
+        logger.warning(f"  ⚠️  {len(high_missing)} columns with >50% missing:")
         for col, pct in high_missing.head(5).items():
-            print(f"     - {col}: {pct:.1f}%")
+            logger.info(f"     - {col}: {pct:.1f}%")
     else:
-        print(f"  ✓ Missing values reasonable (max {missing_pct.max():.1f}%)")
+        logger.info(f"  ✓ Missing values reasonable (max {missing_pct.max():.1f}%)")
 
     return len(high_missing) == 0
 
 
-def check_feature_distributions(df, filename):
+def check_feature_distributions(df: pd.DataFrame, filename: str) -> bool:
     """Check if feature distributions are reasonable"""
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     numeric_cols = [col for col in numeric_cols if col not in ['player_id', 'game_id']]
@@ -101,20 +104,20 @@ def check_feature_distributions(df, filename):
                 issues.append(f"{col} is constant")
 
     if issues:
-        print(f"  ⚠️  Distribution issues ({len(issues)}):")
+        logger.warning(f"  ⚠️  Distribution issues ({len(issues)}):")
         for issue in issues[:5]:
-            print(f"     - {issue}")
+            logger.info(f"     - {issue}")
         return False
 
-    print(f"  ✓ Feature distributions look reasonable")
+    logger.info(f"  ✓ Feature distributions look reasonable")
     return True
 
 
-def validate_feature_file(filename):
+def validate_feature_file(filename: str) -> bool:
     """Run all validations on a feature file"""
-    print(f"\n{'='*60}")
-    print(f"Validating: {filename}")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Validating: {filename}")
+    logger.info(f"{'='*60}")
 
     # Check existence
     if not check_file_exists(filename):
@@ -123,9 +126,10 @@ def validate_feature_file(filename):
     # Load file
     try:
         df = pd.read_parquet(FEATURE_DIR / filename)
-    except Exception as e:
-        print(f"❌ Error loading file: {e}")
-        return False
+    except (FileNotFoundError, pd.errors.ParserError, OSError) as e:
+        # File not found, corrupted, or permission error
+        logger.error(f"❌ Error loading file: {e}")
+        raise  # Always re-raise per user requirement
 
     # Run checks
     grain_ok = check_grain_uniqueness(df, filename)
@@ -136,79 +140,79 @@ def validate_feature_file(filename):
     all_ok = grain_ok and leakage_ok
 
     if all_ok:
-        print(f"\n✅ {filename} passed all critical checks")
+        logger.info(f"\n✅ {filename} passed all critical checks")
     else:
-        print(f"\n❌ {filename} has critical issues")
+        logger.error(f"\n❌ {filename} has critical issues")
 
     return all_ok
 
 
-def validate_master_features():
+def validate_master_features() -> bool:
     """Validate the master feature matrix"""
-    print(f"\n{'='*60}")
-    print("Validating Master Feature Matrix")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info("Validating Master Feature Matrix")
+    logger.info(f"{'='*60}")
 
     filepath = FEATURE_DIR / "master_features.parquet"
 
     if not filepath.exists():
-        print("❌ Master features not found. Run build_features.py first.")
+        logger.error("❌ Master features not found. Run build_features.py first.")
         return False
 
     df = pd.read_parquet(filepath)
 
-    print(f"\nMaster Features Shape: {df.shape}")
-    print(f"Date Range: {df['game_date'].min()} to {df['game_date'].max()}")
-    print(f"Players: {df['player_id'].nunique()}")
-    print(f"Games: {df['game_id'].nunique()}")
+    logger.info(f"\nMaster Features Shape: {df.shape}")
+    logger.info(f"Date Range: {df['game_date'].min()} to {df['game_date'].max()}")
+    logger.info(f"Players: {df['player_id'].nunique()}")
+    logger.info(f"Games: {df['game_id'].nunique()}")
 
     # Check target variable
     if 'target_pra' in df.columns:
-        print(f"\nTarget (PRA) Statistics:")
-        print(f"  Mean: {df['target_pra'].mean():.2f}")
-        print(f"  Median: {df['target_pra'].median():.2f}")
-        print(f"  Std: {df['target_pra'].std():.2f}")
-        print(f"  Min: {df['target_pra'].min():.2f}")
-        print(f"  Max: {df['target_pra'].max():.2f}")
-        print(f"  Missing: {df['target_pra'].isnull().sum()}")
+        logger.info(f"\nTarget (PRA) Statistics:")
+        logger.info(f"  Mean: {df['target_pra'].mean():.2f}")
+        logger.info(f"  Median: {df['target_pra'].median():.2f}")
+        logger.info(f"  Std: {df['target_pra'].std():.2f}")
+        logger.info(f"  Min: {df['target_pra'].min():.2f}")
+        logger.info(f"  Max: {df['target_pra'].max():.2f}")
+        logger.info(f"  Missing: {df['target_pra'].isnull().sum()}")
 
         if df['target_pra'].isnull().sum() > 0:
-            print("  ❌ Target has missing values!")
+            logger.error("  ❌ Target has missing values!")
         else:
-            print("  ✓ Target complete")
+            logger.info("  ✓ Target complete")
 
     # Feature count by category
-    print(f"\nFeature Categories:")
+    logger.info(f"\nFeature Categories:")
     rolling_features = [col for col in df.columns if 'avg' in col or 'ewma' in col or 'trend' in col]
     matchup_features = [col for col in df.columns if 'opp' in col or 'opponent' in col]
     contextual_features = [col for col in df.columns if 'is_' in col or 'day' in col]
     position_features = [col for col in df.columns if 'position' in col]
     injury_features = [col for col in df.columns if 'injury' in col or 'dnp' in col or 'absence' in col]
 
-    print(f"  Rolling: {len(rolling_features)}")
-    print(f"  Matchup: {len(matchup_features)}")
-    print(f"  Contextual: {len(contextual_features)}")
-    print(f"  Position: {len(position_features)}")
-    print(f"  Injury: {len(injury_features)}")
+    logger.info(f"  Rolling: {len(rolling_features)}")
+    logger.info(f"  Matchup: {len(matchup_features)}")
+    logger.info(f"  Contextual: {len(contextual_features)}")
+    logger.info(f"  Position: {len(position_features)}")
+    logger.info(f"  Injury: {len(injury_features)}")
 
     # Overall validation
     grain_ok = check_grain_uniqueness(df, "master_features.parquet")
     leakage_ok = check_temporal_leakage(df, "master_features.parquet")
 
     if grain_ok and leakage_ok:
-        print(f"\n✅ Master features validated successfully")
-        print(f"\nReady for model training!")
+        logger.info(f"\n✅ Master features validated successfully")
+        logger.info(f"\nReady for model training!")
         return True
     else:
-        print(f"\n❌ Master features have issues - fix before training")
+        logger.error(f"\n❌ Master features have issues - fix before training")
         return False
 
 
-def main():
+def main() -> int:
     """Run all validations"""
-    print("="*60)
-    print("FEATURE ENGINEERING VALIDATION")
-    print("="*60)
+    logger.info("="*60)
+    logger.info("FEATURE ENGINEERING VALIDATION")
+    logger.info("="*60)
 
     feature_files = [
         "rolling_features.parquet",
@@ -229,27 +233,27 @@ def main():
     master_ok = validate_master_features()
 
     # Summary
-    print(f"\n{'='*60}")
-    print("VALIDATION SUMMARY")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info("VALIDATION SUMMARY")
+    logger.info(f"{'='*60}")
 
     for filename, result in results.items():
         status = "✅ PASS" if result else "❌ FAIL"
-        print(f"{status}: {filename}")
+        logger.info(f"{status}: {filename}")
 
     master_status = "✅ PASS" if master_ok else "❌ FAIL"
-    print(f"{master_status}: master_features.parquet")
+    logger.info(f"{master_status}: master_features.parquet")
 
     all_pass = all(results.values()) and master_ok
 
     if all_pass:
-        print(f"\n🎉 All validations passed!")
-        print(f"\nNext steps:")
-        print(f"  1. Run: python model_training/train_split.py")
-        print(f"  2. Then: Train your model")
+        logger.info(f"\n🎉 All validations passed!")
+        logger.info(f"\nNext steps:")
+        logger.info(f"  1. Run: python model_training/train_split.py")
+        logger.info(f"  2. Then: Train your model")
         return 0
     else:
-        print(f"\n⚠️  Some validations failed - review issues above")
+        logger.warning(f"\n⚠️  Some validations failed - review issues above")
         return 1
 
 

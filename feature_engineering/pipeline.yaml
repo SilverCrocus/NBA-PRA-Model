@@ -46,7 +46,7 @@ stages:
 
   # Stage 2-7: Feature Generation (Can run in parallel)
   - name: "rolling_features"
-    script: "rolling_features.py"
+    script: "features/rolling_features.py"
     description: "Calculate rolling averages, EWMA, trends, volatility"
 
     depends_on:
@@ -62,7 +62,7 @@ stages:
     estimated_duration: "2-5 minutes"
 
   - name: "matchup_features"
-    script: "matchup_features.py"
+    script: "features/matchup_features.py"
     description: "Generate opponent defensive stats and head-to-head history"
 
     depends_on:
@@ -77,7 +77,7 @@ stages:
     estimated_duration: "3-7 minutes"
 
   - name: "contextual_features"
-    script: "contextual_features.py"
+    script: "features/contextual_features.py"
     description: "Game context features (home/away, rest, season timing)"
 
     depends_on:
@@ -92,7 +92,7 @@ stages:
     estimated_duration: "2-4 minutes"
 
   - name: "advanced_metrics"
-    script: "advanced_metrics.py"
+    script: "features/advanced_metrics.py"
     description: "CTG advanced statistics (usage, efficiency, playmaking)"
 
     depends_on:
@@ -114,7 +114,7 @@ stages:
       Will create placeholder features if CTG data missing.
 
   - name: "position_features"
-    script: "position_features.py"
+    script: "features/position_features.py"
     description: "Position-normalized PRA and percentile rankings"
 
     depends_on:
@@ -131,7 +131,7 @@ stages:
     priority: "HIGH IMPACT"
 
   - name: "injury_features"
-    script: "injury_features.py"
+    script: "features/injury_features.py"
     description: "Injury return tracking and load management indicators"
 
     depends_on:
