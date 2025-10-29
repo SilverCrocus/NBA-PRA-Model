@@ -167,6 +167,20 @@ RESIDUAL_OUTLIER_THRESHOLD = 3.0  # Standard deviations
 # Confidence intervals
 CONFIDENCE_LEVEL = 0.95
 
+# Temporal consistency validation thresholds
+TEMPORAL_RMSE_STABILITY_MIN = 0.8    # Minimum acceptable RMSE ratio (late/early)
+TEMPORAL_RMSE_STABILITY_MAX = 1.2    # Maximum acceptable RMSE ratio
+TEMPORAL_VARIANCE_STABILITY_MIN = 0.7  # Minimum acceptable variance ratio
+TEMPORAL_VARIANCE_STABILITY_MAX = 1.4  # Maximum acceptable variance ratio
+TEMPORAL_BIAS_THRESHOLD = 1.0        # Maximum acceptable mean residual bias
+
+# ============================================================================
+# PIPELINE CONFIGURATION
+# ============================================================================
+
+# Pipeline stage execution timeout (seconds)
+PIPELINE_STAGE_TIMEOUT_SECONDS = 7200  # 2 hours
+
 # ============================================================================
 # TIME-SERIES CROSS-VALIDATION CONFIGURATION
 # ============================================================================

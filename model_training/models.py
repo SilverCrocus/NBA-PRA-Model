@@ -102,18 +102,50 @@ class BaseModel(ABC):
     @classmethod
     def load(cls, path: Path) -> "BaseModel":
         """
-        Load model from disk
+        Load model from disk with validation
 
         Args:
             path: Path to saved model
 
         Returns:
             Loaded model instance
+
+        Raises:
+            FileNotFoundError: If model file doesn't exist
+            ValueError: If model file is invalid or corrupted
         """
         if not path.exists():
             raise FileNotFoundError(f"Model file not found: {path}")
 
         model_data = joblib.load(path)
+
+        # Validate model_data structure
+        required_keys = ['model', 'params', 'feature_names', 'training_history']
+        missing_keys = [k for k in required_keys if k not in model_data]
+        if missing_keys:
+            raise ValueError(
+                f"Invalid model file: missing required keys {missing_keys}. "
+                f"Found keys: {list(model_data.keys())}"
+            )
+
+        # Validate model is not None
+        if model_data['model'] is None:
+            raise ValueError("Model file contains None model - file may be corrupted")
+
+        # Validate feature_names
+        if not isinstance(model_data['feature_names'], list):
+            raise ValueError(
+                f"feature_names must be a list, got {type(model_data['feature_names'])}"
+            )
+
+        if len(model_data['feature_names']) == 0:
+            raise ValueError("feature_names is empty - model has no features")
+
+        # Validate params
+        if not isinstance(model_data['params'], dict):
+            raise ValueError(
+                f"params must be a dict, got {type(model_data['params'])}"
+            )
 
         # Recreate model instance
         instance = cls(params=model_data['params'])

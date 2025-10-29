@@ -23,6 +23,8 @@ from typing import Dict, List, Any, Optional
 import json
 import time
 
+from model_training.config import PIPELINE_STAGE_TIMEOUT_SECONDS
+
 class ModelTrainingPipeline:
     def __init__(self, config_path: str = "pipeline.yaml", args: Optional[argparse.Namespace] = None):
         """Initialize pipeline executor with configuration."""
@@ -220,7 +222,7 @@ class ModelTrainingPipeline:
                 capture_output=True,
                 text=True,
                 cwd=project_root,
-                timeout=7200  # 2 hour timeout for long training
+                timeout=PIPELINE_STAGE_TIMEOUT_SECONDS
             )
 
             duration = time.time() - start_time

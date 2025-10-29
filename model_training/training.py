@@ -95,9 +95,9 @@ def train_model(
 
     logger.info("\n[2/8] Preparing features and target")
 
-    X_train, y_train = prepare_features_target(train_df)
-    X_val, y_val = prepare_features_target(val_df)
-    X_test, y_test = prepare_features_target(test_df)
+    X_train, y_train, _ = prepare_features_target(train_df)
+    X_val, y_val, _ = prepare_features_target(val_df)
+    X_test, y_test, _ = prepare_features_target(test_df)
 
     logger.info(f"  Features: {len(X_train.columns)} columns")
     logger.info(f"  Target: {y_train.name}")
@@ -360,9 +360,9 @@ def train_with_cv(
         logger.info(f"    Test:  {len(test_df):,} games")
 
         # Prepare features and target
-        X_train, y_train = prepare_features_target(train_df)
-        X_val, y_val = prepare_features_target(val_df)
-        X_test, y_test = prepare_features_target(test_df)
+        X_train, y_train, _ = prepare_features_target(train_df)
+        X_val, y_val, _ = prepare_features_target(val_df)
+        X_test, y_test, _ = prepare_features_target(test_df)
 
         logger.info(f"    Features: {len(X_train.columns)} columns")
 
@@ -457,7 +457,7 @@ def train_with_cv(
     for fold_id in fold_ids:
         fold_data = load_cv_fold(fold_id)
         test_df = fold_data['test']
-        X_test, y_test = prepare_features_target(test_df)
+        X_test, y_test, _ = prepare_features_target(test_df)
 
         y_test_pred = ensemble.predict(X_test)
         ensemble_test_metrics = calculate_regression_metrics(y_test, y_test_pred, prefix="ensemble_test_")

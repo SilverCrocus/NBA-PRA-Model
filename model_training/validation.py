@@ -23,6 +23,11 @@ from model_training.config import (
     EXPECTED_R2_MIN,
     EXPECTED_RMSE_MAX,
     EXPECTED_MAE_MAX,
+    TEMPORAL_RMSE_STABILITY_MIN,
+    TEMPORAL_RMSE_STABILITY_MAX,
+    TEMPORAL_VARIANCE_STABILITY_MIN,
+    TEMPORAL_VARIANCE_STABILITY_MAX,
+    TEMPORAL_BIAS_THRESHOLD,
 )
 from model_training.utils import (
     setup_logger,
@@ -76,7 +81,7 @@ def validate_model_on_test(
     logger.info("\n[1/6] Loading test split")
 
     test_df = load_split_data("test")
-    X_test, y_test = prepare_features_target(test_df)
+    X_test, y_test, _ = prepare_features_target(test_df)
 
     logger.info(f"  Test samples: {len(X_test):,}")
     logger.info(f"  Features: {len(X_test.columns)}")
@@ -291,21 +296,25 @@ def check_temporal_consistency(
     rmse_early = np.sqrt(np.mean(early['residual']**2))
     rmse_late = np.sqrt(np.mean(late['residual']**2))
 
-    # Performance should be similar (within 20%) - if late is much better, potential leakage
+    # Performance should be similar - if late is much better, potential leakage
     rmse_ratio = rmse_late / rmse_early if rmse_early > 0 else 1.0
-    checks['Performance stable over time'] = 0.8 <= rmse_ratio <= 1.2
+    checks['Performance stable over time'] = (
+        TEMPORAL_RMSE_STABILITY_MIN <= rmse_ratio <= TEMPORAL_RMSE_STABILITY_MAX
+    )
 
     # Residuals should have consistent variance over time (homoscedasticity)
     var_early = np.var(early['residual'])
     var_late = np.var(late['residual'])
     var_ratio = var_late / var_early if var_early > 0 else 1.0
-    checks['Residual variance consistent'] = 0.7 <= var_ratio <= 1.4
+    checks['Residual variance consistent'] = (
+        TEMPORAL_VARIANCE_STABILITY_MIN <= var_ratio <= TEMPORAL_VARIANCE_STABILITY_MAX
+    )
 
     # Mean residual should be close to 0 in both periods (no systematic bias)
     mean_resid_early = early['residual'].mean()
     mean_resid_late = late['residual'].mean()
-    checks['No systematic bias early'] = abs(mean_resid_early) < 1.0
-    checks['No systematic bias late'] = abs(mean_resid_late) < 1.0
+    checks['No systematic bias early'] = abs(mean_resid_early) < TEMPORAL_BIAS_THRESHOLD
+    checks['No systematic bias late'] = abs(mean_resid_late) < TEMPORAL_BIAS_THRESHOLD
 
     return checks
 

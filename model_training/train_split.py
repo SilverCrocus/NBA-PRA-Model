@@ -6,16 +6,30 @@ CRITICAL: No random shuffling - respects temporal ordering
 
 import pandas as pd
 import numpy as np
+import logging
 from pathlib import Path
 from datetime import datetime
 import argparse
 from typing import List, Dict, Tuple
 
-# Directories
-PROJECT_ROOT = Path(__file__).parent.parent
-FEATURE_DIR = PROJECT_ROOT / "data" / "feature_tables"
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
+from model_training.utils import prepare_features_target, setup_logging
+from model_training.config import (
+    FEATURE_DIR,
+    PROCESSED_DIR,
+    CV_TRAINING_WINDOW_YEARS,
+    CV_GAP_GAMES,
+    CV_MIN_TEST_GAMES,
+    CV_VAL_SPLIT,
+    CV_FOLDS_DIR
+)
+
+# Ensure directories exist
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+if CV_FOLDS_DIR:
+    CV_FOLDS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 
 def load_master_features():
@@ -34,7 +48,7 @@ def load_master_features():
         )
 
     df = pd.read_parquet(filepath)
-    print(f"Loaded master features: {df.shape}")
+    logger.info(f"Loaded master features: {df.shape}")
 
     return df
 
@@ -63,30 +77,30 @@ def create_chronological_splits(df, train_end='2022-10-01', val_end='2023-10-01'
     val = df[(df['game_date'] >= train_end_dt) & (df['game_date'] < val_end_dt)].copy()
     test = df[df['game_date'] >= val_end_dt].copy()
 
-    print("\n" + "="*60)
-    print("CHRONOLOGICAL SPLIT SUMMARY")
-    print("="*60)
+    logger.info("\n" + "="*60)
+    logger.info("CHRONOLOGICAL SPLIT SUMMARY")
+    logger.info("="*60)
 
-    print(f"\nTrain set:")
-    print(f"  Date range: {train['game_date'].min()} to {train['game_date'].max()}")
-    print(f"  Shape: {train.shape}")
-    print(f"  Unique players: {train['player_id'].nunique()}")
+    logger.info(f"\nTrain set:")
+    logger.info(f"  Date range: {train['game_date'].min()} to {train['game_date'].max()}")
+    logger.info(f"  Shape: {train.shape}")
+    logger.info(f"  Unique players: {train['player_id'].nunique()}")
 
-    print(f"\nValidation set:")
-    print(f"  Date range: {val['game_date'].min()} to {val['game_date'].max()}")
-    print(f"  Shape: {val.shape}")
-    print(f"  Unique players: {val['player_id'].nunique()}")
+    logger.info(f"\nValidation set:")
+    logger.info(f"  Date range: {val['game_date'].min()} to {val['game_date'].max()}")
+    logger.info(f"  Shape: {val.shape}")
+    logger.info(f"  Unique players: {val['player_id'].nunique()}")
 
-    print(f"\nTest set:")
-    print(f"  Date range: {test['game_date'].min()} to {test['game_date'].max()}")
-    print(f"  Shape: {test.shape}")
-    print(f"  Unique players: {test['player_id'].nunique()}")
+    logger.info(f"\nTest set:")
+    logger.info(f"  Date range: {test['game_date'].min()} to {test['game_date'].max()}")
+    logger.info(f"  Shape: {test.shape}")
+    logger.info(f"  Unique players: {test['player_id'].nunique()}")
 
     # Validate no temporal leakage
     assert train['game_date'].max() < val['game_date'].min(), "Train dates overlap with validation!"
     assert val['game_date'].max() < test['game_date'].min(), "Validation dates overlap with test!"
 
-    print("\n✓ Temporal split validation passed: No date overlap between sets")
+    logger.info("\n✓ Temporal split validation passed: No date overlap between sets")
 
     return train, val, test
 
@@ -98,67 +112,20 @@ def check_target_distribution(train, val, test):
     Args:
         train, val, test: DataFrames for each split
     """
-    print("\n" + "="*60)
-    print("TARGET DISTRIBUTION")
-    print("="*60)
+    logger.info("\n" + "="*60)
+    logger.info("TARGET DISTRIBUTION")
+    logger.info("="*60)
 
     for name, df in [('Train', train), ('Validation', val), ('Test', test)]:
         if 'target_pra' in df.columns:
-            print(f"\n{name} set PRA:")
-            print(f"  Mean: {df['target_pra'].mean():.2f}")
-            print(f"  Median: {df['target_pra'].median():.2f}")
-            print(f"  Std: {df['target_pra'].std():.2f}")
-            print(f"  Min: {df['target_pra'].min():.2f}")
-            print(f"  Max: {df['target_pra'].max():.2f}")
+            logger.info(f"\n{name} set PRA:")
+            logger.info(f"  Mean: {df['target_pra'].mean():.2f}")
+            logger.info(f"  Median: {df['target_pra'].median():.2f}")
+            logger.info(f"  Std: {df['target_pra'].std():.2f}")
+            logger.info(f"  Min: {df['target_pra'].min():.2f}")
+            logger.info(f"  Max: {df['target_pra'].max():.2f}")
 
-    print("\n" + "="*60)
-
-
-def prepare_for_modeling(df, drop_cols=None):
-    """
-    Prepare DataFrame for modeling
-    Separates features from target and identifiers
-
-    Args:
-        df: DataFrame to prepare
-        drop_cols: Additional columns to drop
-
-    Returns:
-        Tuple of (X, y, metadata)
-    """
-    if drop_cols is None:
-        drop_cols = []
-
-    # Columns to exclude from features
-    exclude_cols = [
-        'target_pra',  # Target variable
-        'player_id',   # Identifier
-        'game_id',     # Identifier
-        'game_date',   # Identifier
-        'player_name', # Identifier
-        'season'       # Identifier (can be feature if you want)
-    ] + drop_cols
-
-    # Metadata columns
-    metadata_cols = ['player_id', 'game_id', 'game_date', 'player_name', 'season']
-    metadata = df[metadata_cols].copy()
-
-    # Target
-    if 'target_pra' in df.columns:
-        y = df['target_pra'].copy()
-    else:
-        raise ValueError("Target variable 'target_pra' not found!")
-
-    # Features
-    feature_cols = [col for col in df.columns if col not in exclude_cols]
-    X = df[feature_cols].copy()
-
-    print(f"\nPrepared for modeling:")
-    print(f"  Features (X): {X.shape}")
-    print(f"  Target (y): {y.shape}")
-    print(f"  Metadata: {metadata.shape}")
-
-    return X, y, metadata
+    logger.info("\n" + "="*60)
 
 
 def handle_missing_values(X_train, X_val, X_test, strategy='median'):
@@ -173,9 +140,9 @@ def handle_missing_values(X_train, X_val, X_test, strategy='median'):
     Returns:
         Tuple of (X_train, X_val, X_test) with imputed values
     """
-    print("\n" + "="*60)
-    print("HANDLING MISSING VALUES")
-    print("="*60)
+    logger.info("\n" + "="*60)
+    logger.info("HANDLING MISSING VALUES")
+    logger.info("="*60)
 
     # Calculate fill values from training set only
     if strategy == 'median':
@@ -202,18 +169,18 @@ def handle_missing_values(X_train, X_val, X_test, strategy='median'):
     val_missing_after = X_val_filled.isnull().sum().sum()
     test_missing_after = X_test_filled.isnull().sum().sum()
 
-    print(f"\nImputation strategy: {strategy}")
-    print(f"\nTrain set: {train_missing_before} → {train_missing_after} missing values")
-    print(f"Validation set: {val_missing_before} → {val_missing_after} missing values")
-    print(f"Test set: {test_missing_before} → {test_missing_after} missing values")
+    logger.info(f"\nImputation strategy: {strategy}")
+    logger.info(f"\nTrain set: {train_missing_before} → {train_missing_after} missing values")
+    logger.info(f"Validation set: {val_missing_before} → {val_missing_after} missing values")
+    logger.info(f"Test set: {test_missing_before} → {test_missing_after} missing values")
 
     if train_missing_after > 0 or val_missing_after > 0 or test_missing_after > 0:
-        print("\n⚠️  WARNING: Some missing values remain after imputation!")
+        logger.info("\n⚠️  WARNING: Some missing values remain after imputation!")
         # Fill remaining with 0
         X_train_filled = X_train_filled.fillna(0)
         X_val_filled = X_val_filled.fillna(0)
         X_test_filled = X_test_filled.fillna(0)
-        print("Filled remaining missing values with 0")
+        logger.info("Filled remaining missing values with 0")
 
     return X_train_filled, X_val_filled, X_test_filled
 
@@ -239,12 +206,12 @@ def save_splits(train_data, val_data, test_data):
     val_df.to_parquet(PROCESSED_DIR / "val.parquet", index=False)
     test_df.to_parquet(PROCESSED_DIR / "test.parquet", index=False)
 
-    print("\n" + "="*60)
-    print("SAVED SPLITS")
-    print("="*60)
-    print(f"Train: {PROCESSED_DIR / 'train.parquet'} ({train_df.shape})")
-    print(f"Validation: {PROCESSED_DIR / 'val.parquet'} ({val_df.shape})")
-    print(f"Test: {PROCESSED_DIR / 'test.parquet'} ({test_df.shape})")
+    logger.info("\n" + "="*60)
+    logger.info("SAVED SPLITS")
+    logger.info("="*60)
+    logger.info(f"Train: {PROCESSED_DIR / 'train.parquet'} ({train_df.shape})")
+    logger.info(f"Validation: {PROCESSED_DIR / 'val.parquet'} ({val_df.shape})")
+    logger.info(f"Test: {PROCESSED_DIR / 'test.parquet'} ({test_df.shape})")
 
 
 # ============================================================================
@@ -294,10 +261,10 @@ def get_available_seasons(df: pd.DataFrame) -> List[str]:
     df['season_detected'] = df['game_date'].apply(detect_season)
     seasons = sorted(df['season_detected'].unique())
 
-    print(f"\nDetected {len(seasons)} seasons in data:")
+    logger.info(f"\nDetected {len(seasons)} seasons in data:")
     for season in seasons:
         season_games = df[df['season_detected'] == season]
-        print(f"  {season}: {len(season_games):,} games "
+        logger.info(f"  {season}: {len(season_games):,} games "
               f"({season_games['game_date'].min().strftime('%Y-%m-%d')} to "
               f"{season_games['game_date'].max().strftime('%Y-%m-%d')})")
 
@@ -306,19 +273,21 @@ def get_available_seasons(df: pd.DataFrame) -> List[str]:
 
 def create_timeseries_cv_splits(
     df: pd.DataFrame,
-    training_window_years: int = 3,
-    gap_games: int = 15,
-    min_test_games: int = 1000,
-    val_split: float = 0.2
+    training_window_years: int = CV_TRAINING_WINDOW_YEARS,
+    gap_games: int = CV_GAP_GAMES,
+    min_test_games: int = CV_MIN_TEST_GAMES,
+    val_split: float = CV_VAL_SPLIT
 ) -> List[Dict[str, pd.DataFrame]]:
     """
-    Create rolling 3-year training windows for time-series CV
+    Create rolling training windows for time-series CV
+
+    Default values are imported from model_training.config
 
     Args:
         df: Master features DataFrame
-        training_window_years: Number of years for training window
-        gap_games: Gap between train end and test start (per player)
-        min_test_games: Minimum games required in test set
+        training_window_years: Number of years for training window (default: from config.CV_TRAINING_WINDOW_YEARS)
+        gap_games: Gap between train end and test start per player (default: from config.CV_GAP_GAMES)
+        min_test_games: Minimum games required in test set (default: from config.CV_MIN_TEST_GAMES)
         val_split: Fraction of training data for validation
 
     Returns:
@@ -343,12 +312,12 @@ def create_timeseries_cv_splits(
         ...
         Fold 5: Train[2020-21, 2021-22, 2022-23] → Test[2023-24]
     """
-    print("\n" + "="*60)
-    print("CREATING TIME-SERIES CV FOLDS")
-    print("="*60)
-    print(f"Training window: {training_window_years} years")
-    print(f"Gap: {gap_games} games per player")
-    print(f"Validation split: {val_split:.0%} of training data")
+    logger.info("\n" + "="*60)
+    logger.info("CREATING TIME-SERIES CV FOLDS")
+    logger.info("="*60)
+    logger.info(f"Training window: {training_window_years} years")
+    logger.info(f"Gap: {gap_games} games per player")
+    logger.info(f"Validation split: {val_split:.0%} of training data")
 
     # Ensure game_date is datetime and add season column
     df['game_date'] = pd.to_datetime(df['game_date'])
@@ -372,7 +341,7 @@ def create_timeseries_cv_splits(
 
         # Check minimum test size
         if len(test_data) < min_test_games:
-            print(f"\n⚠️  Skipping fold {fold_id}: Test set too small "
+            logger.info(f"\n⚠️  Skipping fold {fold_id}: Test set too small "
                   f"({len(test_data)} < {min_test_games} games)")
             continue
 
@@ -397,7 +366,7 @@ def create_timeseries_cv_splits(
 
         # Re-check test size after gap enforcement
         if len(test_data) < min_test_games:
-            print(f"\n⚠️  Skipping fold {fold_id}: Test set too small after gap enforcement "
+            logger.info(f"\n⚠️  Skipping fold {fold_id}: Test set too small after gap enforcement "
                   f"({len(test_data)} < {min_test_games} games)")
             continue
 
@@ -427,35 +396,35 @@ def create_timeseries_cv_splits(
         folds.append(fold)
 
         # Print fold summary
-        print(f"\n{'='*60}")
-        print(f"FOLD {fold_id}")
-        print(f"{'='*60}")
-        print(f"Train seasons: {', '.join(train_seasons)}")
-        print(f"Test season: {test_season}")
-        print(f"\nTrain set:")
-        print(f"  Date range: {fold['train_start'].strftime('%Y-%m-%d')} to {fold['train_end'].strftime('%Y-%m-%d')}")
-        print(f"  Games: {len(train_data):,}")
-        print(f"  Players: {train_data['player_id'].nunique()}")
-        print(f"\nValidation set:")
-        print(f"  Date range: {fold['val_start'].strftime('%Y-%m-%d')} to {fold['val_end'].strftime('%Y-%m-%d')}")
-        print(f"  Games: {len(val_data):,}")
-        print(f"  Players: {val_data['player_id'].nunique()}")
-        print(f"\nTest set:")
-        print(f"  Date range: {fold['test_start'].strftime('%Y-%m-%d')} to {fold['test_end'].strftime('%Y-%m-%d')}")
-        print(f"  Games: {len(test_data):,}")
-        print(f"  Players: {test_data['player_id'].nunique()}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"FOLD {fold_id}")
+        logger.info(f"{'='*60}")
+        logger.info(f"Train seasons: {', '.join(train_seasons)}")
+        logger.info(f"Test season: {test_season}")
+        logger.info(f"\nTrain set:")
+        logger.info(f"  Date range: {fold['train_start'].strftime('%Y-%m-%d')} to {fold['train_end'].strftime('%Y-%m-%d')}")
+        logger.info(f"  Games: {len(train_data):,}")
+        logger.info(f"  Players: {train_data['player_id'].nunique()}")
+        logger.info(f"\nValidation set:")
+        logger.info(f"  Date range: {fold['val_start'].strftime('%Y-%m-%d')} to {fold['val_end'].strftime('%Y-%m-%d')}")
+        logger.info(f"  Games: {len(val_data):,}")
+        logger.info(f"  Players: {val_data['player_id'].nunique()}")
+        logger.info(f"\nTest set:")
+        logger.info(f"  Date range: {fold['test_start'].strftime('%Y-%m-%d')} to {fold['test_end'].strftime('%Y-%m-%d')}")
+        logger.info(f"  Games: {len(test_data):,}")
+        logger.info(f"  Players: {test_data['player_id'].nunique()}")
 
         # Validate no temporal leakage
         assert fold['train_end'] <= fold['val_start'], f"Fold {fold_id}: Train dates overlap with validation!"
         assert fold['val_end'] <= fold['test_start'], f"Fold {fold_id}: Validation dates overlap with test!"
 
-        print(f"\n✓ Temporal validation passed for fold {fold_id}")
+        logger.info(f"\n✓ Temporal validation passed for fold {fold_id}")
 
         fold_id += 1
 
-    print(f"\n{'='*60}")
-    print(f"CREATED {len(folds)} CV FOLDS")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"CREATED {len(folds)} CV FOLDS")
+    logger.info(f"{'='*60}")
 
     return folds
 
@@ -466,7 +435,7 @@ def save_cv_splits(folds: List[Dict], output_dir: Path = None):
 
     Args:
         folds: List of fold dictionaries from create_timeseries_cv_splits()
-        output_dir: Base directory for CV folds (default: PROCESSED_DIR/cv_folds)
+        output_dir: Base directory for CV folds (default: from config.CV_FOLDS_DIR)
 
     Output structure:
         data/processed/cv_folds/
@@ -479,14 +448,14 @@ def save_cv_splits(folds: List[Dict], output_dir: Path = None):
                 ...
     """
     if output_dir is None:
-        output_dir = PROCESSED_DIR / "cv_folds"
+        output_dir = CV_FOLDS_DIR
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("\n" + "="*60)
-    print("SAVING CV FOLDS")
-    print("="*60)
-    print(f"Output directory: {output_dir}")
+    logger.info("\n" + "="*60)
+    logger.info("SAVING CV FOLDS")
+    logger.info("="*60)
+    logger.info(f"Output directory: {output_dir}")
 
     for fold in folds:
         fold_id = fold['fold_id']
@@ -511,14 +480,14 @@ def save_cv_splits(folds: List[Dict], output_dir: Path = None):
             f.write(f"Test: {len(fold['test']):,} games, "
                    f"{fold['test_start'].strftime('%Y-%m-%d')} to {fold['test_end'].strftime('%Y-%m-%d')}\n")
 
-        print(f"\n✓ Saved fold {fold_id} to {fold_dir}")
-        print(f"  train.parquet: {fold['train'].shape}")
-        print(f"  val.parquet: {fold['val'].shape}")
-        print(f"  test.parquet: {fold['test'].shape}")
+        logger.info(f"\n✓ Saved fold {fold_id} to {fold_dir}")
+        logger.info(f"  train.parquet: {fold['train'].shape}")
+        logger.info(f"  val.parquet: {fold['val'].shape}")
+        logger.info(f"  test.parquet: {fold['test'].shape}")
 
-    print(f"\n{'='*60}")
-    print(f"✓ ALL {len(folds)} FOLDS SAVED")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"✓ ALL {len(folds)} FOLDS SAVED")
+    logger.info(f"{'='*60}")
 
 
 def main():
@@ -550,9 +519,9 @@ def main():
 
     if args.cv_mode:
         # CV MODE: Create time-series cross-validation folds
-        print("="*60)
-        print("MODE: TIME-SERIES CROSS-VALIDATION")
-        print("="*60)
+        logger.info("="*60)
+        logger.info("MODE: TIME-SERIES CROSS-VALIDATION")
+        logger.info("="*60)
 
         folds = create_timeseries_cv_splits(
             df,
@@ -564,18 +533,18 @@ def main():
 
         save_cv_splits(folds)
 
-        print("\n" + "="*60)
-        print("✓ CV FOLD CREATION COMPLETE")
-        print("="*60)
-        print(f"Created {len(folds)} CV folds")
-        print("Ready for CV training!")
-        print("\nNext step: uv run model_training/training.py --cv --model-type xgboost")
+        logger.info("\n" + "="*60)
+        logger.info("✓ CV FOLD CREATION COMPLETE")
+        logger.info("="*60)
+        logger.info(f"Created {len(folds)} CV folds")
+        logger.info("Ready for CV training!")
+        logger.info("\nNext step: uv run model_training/training.py --cv --model-type xgboost")
 
     else:
         # SINGLE SPLIT MODE: Create single train/val/test split
-        print("="*60)
-        print("MODE: SINGLE TRAIN/VALIDATION/TEST SPLIT")
-        print("="*60)
+        logger.info("="*60)
+        logger.info("MODE: SINGLE TRAIN/VALIDATION/TEST SPLIT")
+        logger.info("="*60)
 
         # Create chronological splits
         train, val, test = create_chronological_splits(
@@ -588,13 +557,13 @@ def main():
         check_target_distribution(train, val, test)
 
         # Prepare for modeling
-        print("\n" + "="*60)
-        print("PREPARING FOR MODELING")
-        print("="*60)
+        logger.info("\n" + "="*60)
+        logger.info("PREPARING FOR MODELING")
+        logger.info("="*60)
 
-        X_train, y_train, meta_train = prepare_for_modeling(train)
-        X_val, y_val, meta_val = prepare_for_modeling(val)
-        X_test, y_test, meta_test = prepare_for_modeling(test)
+        X_train, y_train, meta_train = prepare_features_target(train, return_metadata=True)
+        X_val, y_val, meta_val = prepare_features_target(val, return_metadata=True)
+        X_test, y_test, meta_test = prepare_features_target(test, return_metadata=True)
 
         # Handle missing values
         X_train, X_val, X_test = handle_missing_values(X_train, X_val, X_test, strategy='median')
@@ -606,11 +575,11 @@ def main():
             (X_test, y_test, meta_test)
         )
 
-        print("\n" + "="*60)
-        print("✓ SPLIT CREATION COMPLETE")
-        print("="*60)
-        print("Ready for model training!")
-        print("\nNext step: uv run model_training/training.py --model-type xgboost")
+        logger.info("\n" + "="*60)
+        logger.info("✓ SPLIT CREATION COMPLETE")
+        logger.info("="*60)
+        logger.info("Ready for model training!")
+        logger.info("\nNext step: uv run model_training/training.py --model-type xgboost")
 
 
 if __name__ == "__main__":

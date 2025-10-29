@@ -118,8 +118,9 @@ def load_split_data(split_name: str) -> pd.DataFrame:
 def prepare_features_target(
     df: pd.DataFrame,
     target_col: str = TARGET_COLUMN,
-    exclude_cols: Optional[List[str]] = None
-) -> Tuple[pd.DataFrame, pd.Series]:
+    exclude_cols: Optional[List[str]] = None,
+    return_metadata: bool = False
+) -> Tuple[pd.DataFrame, pd.Series, Optional[pd.DataFrame]]:
     """
     Separate features from target, exclude non-feature columns
 
@@ -127,9 +128,11 @@ def prepare_features_target(
         df: Full dataset with features and target
         target_col: Target column name
         exclude_cols: Columns to exclude from features (default: config.EXCLUDE_COLUMNS)
+        return_metadata: If True, returns (X, y, metadata). If False, returns (X, y, None)
 
     Returns:
-        Tuple of (X_features, y_target)
+        Tuple of (X_features, y_target, metadata or None)
+        - metadata contains: player_id, game_id, game_date, player_name, season, season_detected
 
     Raises:
         ValueError: If target column missing or no features remain
@@ -144,6 +147,16 @@ def prepare_features_target(
     # Extract target
     y = df[target_col].copy()
 
+    # Extract metadata if requested
+    metadata = None
+    if return_metadata:
+        metadata_cols = ['player_id', 'game_id', 'game_date', 'player_name', 'season']
+        # Only include columns that exist in the DataFrame
+        available_metadata = [col for col in metadata_cols if col in df.columns]
+        if 'season_detected' in df.columns and 'season_detected' not in available_metadata:
+            available_metadata.append('season_detected')
+        metadata = df[available_metadata].copy()
+
     # Extract features (all columns except excluded)
     feature_cols = [col for col in df.columns if col not in exclude_cols]
 
@@ -154,14 +167,37 @@ def prepare_features_target(
 
     X = df[feature_cols].copy()
 
-    # Check for any remaining NaN values in target
+    # Validation checks
+    # 1. Check for NaN values in target
     if y.isnull().any():
         raise ValueError(
             f"Target variable contains {y.isnull().sum()} missing values! "
             "Please handle missing values in train_split.py"
         )
 
-    return X, y
+    # 2. Verify X and y have same length
+    if len(X) != len(y):
+        raise ValueError(
+            f"Feature matrix and target have different lengths: "
+            f"X has {len(X)} rows, y has {len(y)} rows"
+        )
+
+    # 3. Check for inf values in features
+    inf_mask = np.isinf(X.select_dtypes(include=[np.number]))
+    if inf_mask.any().any():
+        inf_cols = inf_mask.any()[inf_mask.any()].index.tolist()
+        raise ValueError(
+            f"Feature matrix contains inf values in {len(inf_cols)} columns: "
+            f"{inf_cols[:5]}{'...' if len(inf_cols) > 5 else ''}"
+        )
+
+    # 4. Check for inf values in target
+    if np.isinf(y).any():
+        raise ValueError(
+            f"Target variable contains {np.isinf(y).sum()} inf values!"
+        )
+
+    return X, y, metadata
 
 
 def calculate_regression_metrics(
@@ -381,7 +417,7 @@ def load_cv_fold(fold_id: int, fold_dir: Path = None) -> Dict[str, pd.DataFrame]
 
     Example:
         >>> fold_data = load_cv_fold(0)
-        >>> X_train, y_train = prepare_features_target(fold_data['train'])
+        >>> X_train, y_train, _ = prepare_features_target(fold_data['train'])
     """
     if fold_dir is None:
         fold_dir = CV_FOLDS_DIR
