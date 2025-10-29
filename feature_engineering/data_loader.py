@@ -201,9 +201,9 @@ def load_ctg_player_data(season='2023-24', season_type='regular_season'):
     ]
 
     for stat_file in stat_files:
-        file_path = season_path / stat_file
+        stat_name = stat_file.replace('.csv', '')
+        file_path = season_path / stat_name / stat_file
         if file_path.exists():
-            stat_name = stat_file.replace('.csv', '')
             ctg_data[stat_name] = pd.read_csv(file_path)
 
     # Load on/off data
@@ -232,7 +232,7 @@ def consolidate_ctg_data_all_seasons():
             season = season_dir.name
 
             # Load regular season offensive overview (main stats)
-            reg_season_path = season_dir / 'regular_season' / 'offensive_overview.csv'
+            reg_season_path = season_dir / 'regular_season' / 'offensive_overview' / 'offensive_overview.csv'
 
             if reg_season_path.exists():
                 df = pd.read_csv(reg_season_path)
@@ -245,6 +245,21 @@ def consolidate_ctg_data_all_seasons():
 
         # Standardize column names
         combined.columns = combined.columns.str.lower().str.replace(' ', '_')
+
+        # Convert percentage columns to numeric (remove '%' and divide by 100)
+        percentage_cols = [col for col in combined.columns if '%' in col]
+        for col in percentage_cols:
+            combined[col] = combined[col].astype(str).str.replace('%', '').astype(float) / 100
+
+        # Convert 'usage' column which also has percentage values but % not in column name
+        if 'usage' in combined.columns:
+            combined['usage'] = combined['usage'].astype(str).str.replace('%', '').astype(float) / 100
+
+        # Convert other numeric columns
+        numeric_cols = ['psa', 'ast:usg', 'age', 'min']
+        for col in numeric_cols:
+            if col in combined.columns:
+                combined[col] = pd.to_numeric(combined[col], errors='coerce')
 
         return combined
 
@@ -274,9 +289,10 @@ def main():
     Run this to collect the base dataset
     """
     # Define seasons to fetch (adjust as needed)
+    # 10 seasons: 2024-25 (current) + 9 historical seasons back to 2015-16
     seasons = [
-        '2023-24', '2022-23', '2021-22', '2020-21',
-        '2019-20', '2018-19'
+        '2024-25', '2023-24', '2022-23', '2021-22', '2020-21',
+        '2019-20', '2018-19', '2017-18', '2016-17', '2015-16'
     ]
 
     print("Starting NBA API data collection...")
@@ -285,7 +301,7 @@ def main():
 
     # For testing, set sample_size to a small number (e.g., 10)
     # For production, set to None to fetch all players
-    SAMPLE_SIZE = 10  # Testing with 10 players
+    SAMPLE_SIZE = None  # Testing with 10 players
 
     # Fetch data
     gamelogs = fetch_all_player_gamelogs(seasons, sample_size=SAMPLE_SIZE)

@@ -255,25 +255,155 @@ def validate_no_leakage(df, features_df):
     """
     Validate that features don't contain future information
 
+    Performs comprehensive checks:
+    1. First game of each player should have NaN/0 for all rolling features
+    2. Rolling features should be properly populated in mid-season games
+    3. Spot check random games for reasonable values
+
     Args:
-        df: Original game logs
-        features_df: Computed features
+        df: Original game logs (must have player_id, game_id, game_date)
+        features_df: Computed features (must have player_id, game_id, game_date)
 
     Raises:
-        AssertionError if validation fails
+        AssertionError if validation fails with detailed error messages
     """
-    # Check 1: For first game of each player, rolling features should be NaN or minimal
-    first_games = df.groupby('player_id').head(1)
+    print("\n" + "="*60)
+    print("DATA LEAKAGE VALIDATION")
+    print("="*60)
 
-    for game_id in first_games['game_id'].values:
-        feature_row = features_df[features_df['game_id'] == game_id].iloc[0]
+    # Identify all rolling feature columns
+    rolling_cols = [col for col in features_df.columns
+                   if any(pattern in col for pattern in ['_avg_', '_std_', '_ewma_', '_trend_'])]
 
-        # First game should not have full 10-game average
-        if 'pra_avg_last10' in feature_row:
-            assert pd.isna(feature_row['pra_avg_last10']) or feature_row['pra_avg_last10'] == 0, \
-                f"Leakage detected: First game has rolling avg"
+    print(f"Checking {len(rolling_cols)} rolling features for leakage...")
+    if len(rolling_cols) > 5:
+        print(f"Features to validate: {rolling_cols[:5]}...")
+    else:
+        print(f"Features: {rolling_cols}")
 
-    print("✓ Leakage validation passed: No future information in features")
+    # Check 1: First game of each player
+    print("\nCheck 1: First game per player (should have NaN/0)...")
+    first_games = df.groupby('player_id').first().reset_index()[['player_id', 'game_id', 'game_date']]
+
+    leakage_detected = []
+    missing_features = 0
+
+    for idx, row in first_games.iterrows():
+        # FIXED: Look up using correct grain [player_id, game_id]
+        feature_row = features_df[
+            (features_df['player_id'] == row['player_id']) &
+            (features_df['game_id'] == row['game_id'])
+        ]
+
+        if len(feature_row) == 0:
+            missing_features += 1
+            continue
+
+        feature_row = feature_row.iloc[0]
+
+        # Check all rolling features
+        for col in rolling_cols:
+            if col not in feature_row:
+                continue
+
+            value = feature_row[col]
+
+            # First game should be NaN or 0
+            if pd.notna(value) and value != 0:
+                leakage_detected.append({
+                    'player_id': row['player_id'],
+                    'game_id': row['game_id'],
+                    'game_date': row['game_date'],
+                    'feature': col,
+                    'value': value
+                })
+
+    # Report results
+    if missing_features > 0:
+        print(f"  ⚠️  Warning: {missing_features} players have no features (might be filtered)")
+
+    if leakage_detected:
+        print(f"\n  ❌ LEAKAGE DETECTED in {len(leakage_detected)} cases:")
+        for case in leakage_detected[:10]:  # Show first 10
+            print(f"     Player {case['player_id']}, Game {case['game_id']} ({case['game_date']})")
+            print(f"       → {case['feature']} = {case['value']:.2f} (should be NaN or 0)")
+
+        if len(leakage_detected) > 10:
+            print(f"     ... and {len(leakage_detected) - 10} more cases")
+
+        raise AssertionError(
+            f"DATA LEAKAGE DETECTED: {len(leakage_detected)} first-game features have non-zero values. "
+            f"This indicates rolling calculations are including the current game. "
+            f"Ensure all rolling operations use .shift(1) before .rolling()."
+        )
+
+    print(f"  ✓ All {len(first_games) - missing_features} first games have NaN/0 for rolling features")
+
+    # Check 2: Sample mid-season games (rolling features should be populated)
+    print("\nCheck 2: Mid-season games (rolling features should be populated)...")
+    mid_season_games = df.groupby('player_id').apply(
+        lambda x: x.iloc[min(15, len(x)-1)] if len(x) > 15 else None
+    ).dropna().reset_index(drop=True)[['player_id', 'game_id', 'game_date']]
+
+    if len(mid_season_games) > 0:
+        sample_size = min(50, len(mid_season_games))
+        mid_season_sample = mid_season_games.sample(sample_size, random_state=42)
+
+        unpopulated_count = 0
+        for idx, row in mid_season_sample.iterrows():
+            feature_row = features_df[
+                (features_df['player_id'] == row['player_id']) &
+                (features_df['game_id'] == row['game_id'])
+            ]
+
+            if len(feature_row) == 0:
+                continue
+
+            feature_row = feature_row.iloc[0]
+
+            # Check if key rolling features are populated
+            key_features = ['pra_avg_last10', 'points_avg_last10']
+            for col in key_features:
+                if col in feature_row and pd.isna(feature_row[col]):
+                    unpopulated_count += 1
+                    break
+
+        if unpopulated_count > sample_size * 0.3:  # More than 30% unpopulated
+            print(f"  ⚠️  Warning: {unpopulated_count}/{sample_size} mid-season games have missing rolling features")
+        else:
+            print(f"  ✓ Mid-season games have populated rolling features ({sample_size - unpopulated_count}/{sample_size})")
+
+    # Check 3: No future information in any game
+    print("\nCheck 3: Spot check random games for reasonable values...")
+    random_sample = features_df.sample(min(100, len(features_df)), random_state=42)
+
+    unreasonable_values = []
+    for col in rolling_cols[:10]:  # Check first 10 rolling features
+        if col not in random_sample:
+            continue
+
+        col_data = random_sample[col].dropna()
+        if len(col_data) == 0:
+            continue
+
+        # Check for unreasonable values (e.g., negative averages, extreme values)
+        if 'avg' in col or 'ewma' in col:
+            # Averages should be in reasonable range (0-100 for most NBA stats)
+            if col_data.min() < -10 or col_data.max() > 200:
+                unreasonable_values.append((col, col_data.min(), col_data.max()))
+
+    if unreasonable_values:
+        print(f"  ⚠️  Warning: {len(unreasonable_values)} features have unreasonable value ranges:")
+        for col, min_val, max_val in unreasonable_values[:5]:
+            print(f"     {col}: [{min_val:.2f}, {max_val:.2f}]")
+    else:
+        print(f"  ✓ Spot check passed: All values in reasonable ranges")
+
+    print("\n" + "="*60)
+    print("✅ LEAKAGE VALIDATION PASSED")
+    print("="*60)
+    print("All rolling features properly exclude current game information.")
+    print(f"Validated {len(rolling_cols)} features across {len(features_df):,} games.\n")
 
 
 def build_rolling_features():

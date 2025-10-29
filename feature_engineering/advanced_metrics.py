@@ -60,9 +60,9 @@ def create_usage_features(df):
     features = df[['player_id', 'game_id', 'game_date']].copy()
 
     # Usage Rate (percentage of team possessions used)
-    if 'usg%' in df.columns:
-        features['usage_rate'] = df['usg%']
-        features['usage_rate_rank'] = df.get('usg%_rank', np.nan)
+    if 'usage' in df.columns:
+        features['usage_rate'] = df['usage']
+        features['usage_rate_rank'] = df.get('usage_rank', np.nan)
     else:
         features['usage_rate'] = np.nan
         features['usage_rate_rank'] = np.nan
@@ -99,8 +99,8 @@ def create_playmaking_features(df):
         features['assist_rate_rank'] = np.nan
 
     # Assist to usage ratio (playmaking efficiency)
-    if 'ast/usg' in df.columns:
-        features['ast_to_usage_ratio'] = df['ast/usg']
+    if 'ast:usg' in df.columns:
+        features['ast_to_usage_ratio'] = df['ast:usg']
     else:
         features['ast_to_usage_ratio'] = np.nan
 
@@ -223,16 +223,16 @@ def create_role_indicators(df):
     # Group by player and calculate rolling averages (season-based)
 
     # High usage player (star/primary option)
-    if 'usg%' in df.columns:
-        features['is_high_usage'] = (df['usg%'] >= 25).astype(int)
-        features['is_low_usage'] = (df['usg%'] < 18).astype(int)
+    if 'usage' in df.columns:
+        features['is_high_usage'] = (df['usage'] >= 0.25).astype(int)
+        features['is_low_usage'] = (df['usage'] < 0.18).astype(int)
     else:
         features['is_high_usage'] = 0
         features['is_low_usage'] = 0
 
     # Primary playmaker
     if 'ast%' in df.columns:
-        features['is_primary_playmaker'] = (df['ast%'] >= 25).astype(int)
+        features['is_primary_playmaker'] = (df['ast%'] >= 0.25).astype(int)
     else:
         features['is_primary_playmaker'] = 0
 
@@ -275,7 +275,7 @@ def validate_advanced_metrics(features_df):
     if 'usage_rate' in features_df.columns:
         usage_mean = features_df['usage_rate'].dropna().mean()
         if not np.isnan(usage_mean):
-            assert 10 < usage_mean < 35, f"Usage rate mean unusual: {usage_mean}"
+            assert 0.10 < usage_mean < 0.35, f"Usage rate mean unusual: {usage_mean}"
 
     # Check true shooting is in reasonable range
     if 'true_shooting_pct' in features_df.columns:
