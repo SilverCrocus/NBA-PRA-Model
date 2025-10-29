@@ -40,11 +40,13 @@ env/
 *.ipynb
 
 # Data files (large files, don't commit)
-data/nba_api/*.parquet
-data/feature_tables/*.parquet
-data/processed/*.parquet
+data/
 *.csv
 *.json
+
+# MLflow tracking
+mlruns/
+.pipeline_state.json
 
 # Model files
 *.pkl

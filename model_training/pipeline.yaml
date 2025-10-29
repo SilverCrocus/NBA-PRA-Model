@@ -1,0 +1,315 @@
+# NBA PRA Model Training Pipeline Configuration
+# Version: 1.0.0
+# Description: Automated orchestration of model training with single-split or CV modes
+
+metadata:
+  name: "NBA PRA Model Training"
+  description: "Train XGBoost/LightGBM models for NBA player PRA prediction"
+  version: "1.0.0"
+  author: "diyagamah"
+
+# Global configuration
+config:
+  # Execution behavior
+  fail_fast: true  # Stop on first error
+  execution_mode: "sequential"  # sequential or parallel
+
+  # Training mode: "single_split" or "cv"
+  training_mode: "cv"  # Default to CV mode for better generalization
+
+  # Model selection
+  model_type: "xgboost"  # xgboost or lightgbm
+
+  # Logging
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_dir: "logs"  # Save logs to model_training/logs/
+  log_to_console: true
+  log_to_file: true
+
+  # State management
+  state_file: ".model_training_state.json"  # Save to model_training/.model_training_state.json
+  enable_resume: true  # Allow --skip-completed flag
+
+  # MLflow tracking
+  mlflow_tracking: true
+  mlflow_experiment: "nba_pra_prediction"
+
+# Pipeline stages
+stages:
+  # ==========================================================================
+  # DATA SPLITTING STAGES
+  # ==========================================================================
+
+  # Stage 1A: Single Split Creation (Mutually exclusive with 1B)
+  - name: "create_single_split"
+    script: "train_split.py"
+    description: "Create single train/val/test chronological split"
+
+    enabled: false  # Set to true for single-split mode
+
+    depends_on:
+      - "../data/feature_tables/master_features.parquet"
+
+    outputs:
+      - "../data/processed/train.parquet"
+      - "../data/processed/val.parquet"
+      - "../data/processed/test.parquet"
+
+    validation:
+      check_output_exists: true
+      check_no_temporal_overlap: true
+      min_train_samples: 1000
+      min_test_samples: 500
+
+    estimated_duration: "30 seconds - 2 minutes"
+
+    notes: |
+      Creates single chronological split with default dates:
+      - Train: < 2022-10-01
+      - Val: 2022-10-01 to 2023-10-01
+      - Test: >= 2023-10-01
+
+      To customize dates, run manually with --train-end and --val-end flags.
+
+  # Stage 1B: CV Splits Creation (Mutually exclusive with 1A)
+  - name: "create_cv_splits"
+    script: "train_split.py"
+    args: "--cv-mode"
+    description: "Create time-series CV folds with 3-year rolling windows"
+
+    enabled: true  # Set to true for CV mode (RECOMMENDED)
+
+    depends_on:
+      - "../data/feature_tables/master_features.parquet"
+
+    outputs:
+      - "../data/processed/cv_folds/fold_0/train.parquet"
+      - "../data/processed/cv_folds/fold_0/val.parquet"
+      - "../data/processed/cv_folds/fold_0/test.parquet"
+      # Additional folds auto-detected
+
+    validation:
+      check_output_exists: true
+      check_no_temporal_overlap: true
+      check_gap_enforcement: true  # Verify 15-game gap
+      min_folds: 3  # At least 3 folds required
+
+    estimated_duration: "1-3 minutes"
+    expected_folds: "5-6 (depends on data range)"
+
+    notes: |
+      Creates rolling 3-year training windows:
+      - Training window: 3 years (configurable)
+      - Gap: 15 games per player (prevents leakage)
+      - Val split: 20% of training data
+
+      Example for 2015-24 data:
+      - Fold 0: Train[2015-18] → Test[2018-19]
+      - Fold 1: Train[2016-19] → Test[2019-20]
+      - ... (6 folds total)
+
+  # ==========================================================================
+  # MODEL TRAINING STAGES
+  # ==========================================================================
+
+  # Stage 2A: Single Model Training (Mutually exclusive with 2B)
+  - name: "train_single_model"
+    script: "training.py"
+    args: "--model-type ${model_type}"
+    description: "Train single model on train/val/test split"
+
+    enabled: false  # Set to true for single-split mode
+
+    depends_on:
+      - "../data/processed/train.parquet"
+      - "../data/processed/val.parquet"
+      - "../data/processed/test.parquet"
+
+    outputs:
+      - "../models/${model_type}_model_*.pkl"
+      - "../models/${model_type}_feature_importance_*.csv"
+
+    validation:
+      check_model_saved: true
+      check_feature_importance_saved: true
+      min_val_r2: 0.70  # Minimum acceptable R²
+      max_val_mae: 5.0  # Maximum acceptable MAE
+
+    estimated_duration: "5-15 minutes"
+    expected_performance:
+      val_mae: "3.5-4.5"
+      val_rmse: "4.5-5.5"
+      val_r2: "0.80-0.86"
+
+    notes: |
+      Trains single model with early stopping on validation set.
+      MAE-optimized XGBoost params (min_child_weight=0).
+
+  # Stage 2B: CV Model Training (Mutually exclusive with 2A)
+  - name: "train_cv_ensemble"
+    script: "training.py"
+    args: "--cv --model-type ${model_type}"
+    description: "Train ensemble model using time-series CV"
+
+    enabled: true  # Set to true for CV mode (RECOMMENDED)
+    critical: true  # Fail pipeline if training fails
+
+    depends_on:
+      - "../data/processed/cv_folds/fold_0/train.parquet"
+      # Additional fold dependencies auto-detected
+
+    outputs:
+      - "../models/${model_type}_ensemble_*folds_*.pkl"
+      - "../models/${model_type}_ensemble_feature_importance_*.csv"
+      - "../logs/${model_type}_cv_summary_*.csv"
+
+    validation:
+      check_ensemble_saved: true
+      check_cv_summary_saved: true
+      min_cv_r2_mean: 0.75  # Minimum acceptable mean R²
+      max_cv_mae_mean: 4.5  # Maximum acceptable mean MAE
+      max_cv_std: 0.5  # Maximum standard deviation (stability check)
+
+    estimated_duration: "60-90 minutes (depends on n_folds)"
+    expected_performance:
+      cv_mae_mean: "3.2-3.8"
+      cv_rmse_mean: "4.2-4.8"
+      cv_r2_mean: "0.82-0.88"
+      ensemble_improvement: "8-15% over single models"
+
+    priority: "HIGH IMPACT"
+
+    notes: |
+      Trains model on each CV fold, creates ensemble by averaging.
+      Significantly more robust than single-split training.
+
+      Performance metrics are averaged across all folds.
+      Lower CV standard deviation indicates more stable model.
+
+  # ==========================================================================
+  # MODEL VALIDATION STAGES (OPTIONAL - Run after training)
+  # ==========================================================================
+
+  # Stage 3: Model Validation and Diagnostics
+  - name: "validate_model"
+    script: "validation.py"
+    args: "--model ${latest_model}"
+    description: "Comprehensive model validation with diagnostic plots"
+
+    enabled: false  # Set to true to run validation after training
+
+    depends_on:
+      - "${latest_model}"  # Auto-detect latest trained model
+
+    outputs:
+      - "../models/validation_diagnostic_plots_*.png"
+      - "../models/test_predictions_*.csv"
+
+    validation:
+      check_plots_generated: true
+      check_predictions_saved: true
+      check_no_data_leakage: true
+
+    estimated_duration: "2-5 minutes"
+
+    notes: |
+      Generates 6 diagnostic plots:
+      - Predicted vs Actual
+      - Residual plot
+      - Residual distribution
+      - Q-Q plot
+      - Absolute residuals vs predicted
+      - Error by prediction range
+
+      Run manually with:
+        uv run model_training/validation.py --model <path>
+
+# ==========================================================================
+# WORKFLOW PRESETS
+# ==========================================================================
+
+# Preset: Quick Single-Split Training
+workflows:
+  quick_single:
+    description: "Fast single-split training for testing"
+    stages:
+      - create_single_split
+      - train_single_model
+    expected_duration: "10-20 minutes"
+
+  # Preset: Production CV Training (RECOMMENDED)
+  production_cv:
+    description: "Robust CV training with ensemble"
+    stages:
+      - create_cv_splits
+      - train_cv_ensemble
+    expected_duration: "70-100 minutes"
+
+  # Preset: Full Pipeline with Validation
+  full_pipeline:
+    description: "Complete training pipeline with diagnostics"
+    stages:
+      - create_cv_splits
+      - train_cv_ensemble
+      - validate_model
+    expected_duration: "75-110 minutes"
+
+# ==========================================================================
+# MONITORING AND ALERTS
+# ==========================================================================
+
+monitoring:
+  track_duration: true
+  track_memory_usage: false  # Requires psutil
+  track_model_size: true
+  track_metrics: true
+
+  alerts:
+    slow_execution_threshold: 1.5  # Alert if >1.5x estimated duration
+    low_performance: "warn"  # warn or fail
+    high_cv_variance: "warn"  # Alert if CV std > threshold
+    missing_output: "fail"  # fail, warn, or ignore
+
+  performance_thresholds:
+    min_r2: 0.75  # Below this triggers warning
+    max_mae: 5.0  # Above this triggers warning
+    max_cv_std: 0.5  # CV stability threshold
+
+# ==========================================================================
+# EXPERIMENT TRACKING
+# ==========================================================================
+
+mlflow:
+  enabled: true
+  tracking_uri: "file:./mlruns"
+  experiment_name: "nba_pra_prediction"
+
+  log_artifacts:
+    - "feature_importance"
+    - "cv_summary"
+    - "model_params"
+    - "diagnostic_plots"
+
+  tags:
+    project: "NBA_PRA"
+    task: "regression"
+    target: "pra"
+    data_type: "time_series"
+    author: "diyagamah"
+
+# ==========================================================================
+# HYPERPARAMETER TUNING (FUTURE)
+# ==========================================================================
+
+# hyperparameter_tuning:
+#   enabled: false  # Not yet implemented
+#   framework: "optuna"  # optuna or grid_search
+#   n_trials: 50
+#   timeout: 3600  # 1 hour
+#
+#   search_space:
+#     max_depth: [3, 10]
+#     learning_rate: [0.01, 0.1]
+#     min_child_weight: [0, 5]
+#     subsample: [0.5, 1.0]
+#     colsample_bytree: [0.5, 1.0]

@@ -8,9 +8,13 @@ import numpy as np
 from pathlib import Path
 import time
 from datetime import datetime
+from typing import List, Dict, Optional
 from nba_api.stats.endpoints import playergamelog
 from nba_api.stats.static import players, teams
 from tqdm import tqdm
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -20,13 +24,17 @@ NBA_API_DIR = DATA_DIR / "nba_api"
 NBA_API_DIR.mkdir(exist_ok=True)
 
 
-def get_all_players():
+def get_all_players() -> pd.DataFrame:
     """Get list of all NBA players"""
     all_players = players.get_players()
     return pd.DataFrame(all_players)
 
 
-def fetch_player_game_logs(player_id, seasons, delay=2.0):
+def fetch_player_game_logs(
+    player_id: int,
+    seasons: List[str],
+    delay: float = 2.0
+) -> pd.DataFrame:
     """
     Fetch game logs for a player across multiple seasons
 
@@ -56,7 +64,7 @@ def fetch_player_game_logs(player_id, seasons, delay=2.0):
                 all_games.append(df)
 
         except Exception as e:
-            print(f"Error fetching {season} for player {player_id}: {str(e)}")
+            logger.error(f"Error fetching {season} for player {player_id}: {str(e)}")
             continue
 
     if all_games:
@@ -64,13 +72,16 @@ def fetch_player_game_logs(player_id, seasons, delay=2.0):
     return pd.DataFrame()
 
 
-def calculate_pra(df):
+def calculate_pra(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate PRA (Points + Rebounds + Assists)"""
     df['PRA'] = df['PTS'] + df['REB'] + df['AST']
     return df
 
 
-def fetch_all_player_gamelogs(seasons, sample_size=None):
+def fetch_all_player_gamelogs(
+    seasons: List[str],
+    sample_size: Optional[int] = None
+) -> pd.DataFrame:
     """
     Fetch game logs for all players across seasons
 
@@ -88,7 +99,7 @@ def fetch_all_player_gamelogs(seasons, sample_size=None):
 
     all_gamelogs = []
 
-    print(f"Fetching game logs for {len(all_players_df)} players across {len(seasons)} seasons...")
+    logger.info(f"Fetching game logs for {len(all_players_df)} players across {len(seasons)} seasons...")
 
     for _, player in tqdm(all_players_df.iterrows(), total=len(all_players_df)):
         player_id = player['id']
@@ -109,7 +120,7 @@ def fetch_all_player_gamelogs(seasons, sample_size=None):
     return pd.DataFrame()
 
 
-def clean_nba_api_data(df):
+def clean_nba_api_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     Clean and standardize NBA API game log data
 
@@ -171,7 +182,10 @@ def clean_nba_api_data(df):
     return df
 
 
-def load_ctg_player_data(season='2023-24', season_type='regular_season'):
+def load_ctg_player_data(
+    season: str = '2023-24',
+    season_type: str = 'regular_season'
+) -> Dict[str, pd.DataFrame]:
     """
     Load CTG player data for a specific season
 
@@ -185,7 +199,7 @@ def load_ctg_player_data(season='2023-24', season_type='regular_season'):
     season_path = CTG_DATA_DIR / 'players' / season / season_type
 
     if not season_path.exists():
-        print(f"Warning: CTG data not found at {season_path}")
+        logger.warning(f"Warning: CTG data not found at {season_path}")
         return {}
 
     ctg_data = {}
@@ -216,7 +230,7 @@ def load_ctg_player_data(season='2023-24', season_type='regular_season'):
     return ctg_data
 
 
-def consolidate_ctg_data_all_seasons():
+def consolidate_ctg_data_all_seasons() -> pd.DataFrame:
     """
     Consolidate all CTG player data across seasons
 
@@ -261,19 +275,32 @@ def consolidate_ctg_data_all_seasons():
             if col in combined.columns:
                 combined[col] = pd.to_numeric(combined[col], errors='coerce')
 
+        # Handle duplicate player-season records (traded players)
+        # Keep the row with maximum minutes (primary team)
+        logger.info(f"CTG data before deduplication: {len(combined)} rows, {combined[['player', 'season']].drop_duplicates().shape[0]} unique player-seasons")
+
+        duplicates_before = len(combined) - len(combined[['player', 'season']].drop_duplicates())
+        if duplicates_before > 0:
+            logger.info(f"Found {duplicates_before} duplicate player-season records (traded players)")
+            combined = combined.sort_values('min', ascending=False).drop_duplicates(
+                subset=['player', 'season'],
+                keep='first'
+            ).reset_index(drop=True)
+            logger.info(f"Deduplicated to {len(combined)} rows (kept max minutes per player-season)")
+
         return combined
 
     return pd.DataFrame()
 
 
-def save_player_gamelogs(df, filename='player_games.parquet'):
+def save_player_gamelogs(df: pd.DataFrame, filename: str = 'player_games.parquet') -> None:
     """Save player game logs to parquet"""
     output_path = NBA_API_DIR / filename
     df.to_parquet(output_path, index=False)
-    print(f"Saved {len(df)} game logs to {output_path}")
+    logger.info(f"Saved {len(df)} game logs to {output_path}")
 
 
-def load_player_gamelogs(filename='player_games.parquet'):
+def load_player_gamelogs(filename: str = 'player_games.parquet') -> pd.DataFrame:
     """Load player game logs from parquet"""
     input_path = NBA_API_DIR / filename
 
@@ -283,7 +310,7 @@ def load_player_gamelogs(filename='player_games.parquet'):
     return pd.read_parquet(input_path)
 
 
-def main():
+def main() -> None:
     """
     Main function to fetch and save NBA API data
     Run this to collect the base dataset
@@ -295,9 +322,9 @@ def main():
         '2019-20', '2018-19', '2017-18', '2016-17', '2015-16'
     ]
 
-    print("Starting NBA API data collection...")
-    print("This will take several hours due to rate limiting (2 sec per request)")
-    print(f"Fetching seasons: {', '.join(seasons)}")
+    logger.info("Starting NBA API data collection...")
+    logger.info("This will take several hours due to rate limiting (2 sec per request)")
+    logger.info(f"Fetching seasons: {', '.join(seasons)}")
 
     # For testing, set sample_size to a small number (e.g., 10)
     # For production, set to None to fetch all players
@@ -313,12 +340,12 @@ def main():
         # Save to parquet
         save_player_gamelogs(gamelogs)
 
-        print(f"\nData collection complete!")
-        print(f"Total games: {len(gamelogs)}")
-        print(f"Total players: {gamelogs['player_id'].nunique()}")
-        print(f"Date range: {gamelogs['game_date'].min()} to {gamelogs['game_date'].max()}")
+        logger.info(f"\nData collection complete!")
+        logger.info(f"Total games: {len(gamelogs)}")
+        logger.info(f"Total players: {gamelogs['player_id'].nunique()}")
+        logger.info(f"Date range: {gamelogs['game_date'].min()} to {gamelogs['game_date'].max()}")
     else:
-        print("No data collected!")
+        logger.info("No data collected!")
 
 
 if __name__ == "__main__":
