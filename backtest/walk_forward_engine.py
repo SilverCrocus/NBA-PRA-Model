@@ -14,7 +14,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import timedelta
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Union, Optional
 import logging
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -29,7 +29,11 @@ from backtest.config import (
     XGBOOST_PARAMS, CV_FOLDS, CV_VALIDATION_SPLIT,
     DAILY_PREDICTIONS_PATH, DAILY_METRICS_PATH,
     PROGRESS_LOG_INTERVAL, SAVE_CHECKPOINT_INTERVAL,
-    setup_logging
+    setup_logging,
+    # Monte Carlo configuration
+    ENABLE_MONTE_CARLO, VARIANCE_MODEL_PARAMS,
+    KELLY_FRACTION, MIN_EDGE_KELLY, MIN_CONFIDENCE, MAX_CV,
+    ENABLE_CALIBRATION, CONFORMAL_ALPHA, MC_PROBABILITY_METHOD
 )
 from backtest.data_loader import (
     get_training_window,
@@ -48,6 +52,18 @@ from feature_engineering.features.ctg_imputation import (
     impute_missing_ctg,
     create_position_relative_features
 )
+
+# Conditional Monte Carlo imports (only load if enabled)
+if ENABLE_MONTE_CARLO:
+    from backtest.monte_carlo import (
+        VarianceModel,
+        fit_gamma_parameters,
+        calculate_probability_over_line,
+        ConformalCalibrator,
+        calculate_bet_decisions as mc_calculate_bet_decisions
+    )
+    logger_temp = setup_logging('monte_carlo_check')
+    logger_temp.info("✓ Monte Carlo module enabled and loaded successfully")
 
 logger = setup_logging('walk_forward_backtest')
 
@@ -83,10 +99,16 @@ class WalkForwardBacktest:
         self.daily_predictions = []
         self.daily_metrics = []
 
+        # Monte Carlo state variables
+        self.mc_enabled = ENABLE_MONTE_CARLO
+        self.variance_model = None
+        self.calibrator = None
+
         logger.info("Walk-Forward Backtest Engine initialized")
         logger.info(f"  Historical data: {len(all_data)} games")
         logger.info(f"  Test data: {len(test_data)} games")
         logger.info(f"  Betting lines: {len(odds_data)} lines")
+        logger.info(f"  Monte Carlo: {'ENABLED' if self.mc_enabled else 'DISABLED'}")
 
     def create_cv_folds(self,
                        train_data: pd.DataFrame,
@@ -155,15 +177,16 @@ class WalkForwardBacktest:
         return model
 
     def train_ensemble(self,
-                      train_data: pd.DataFrame) -> List[XGBRegressor]:
+                      train_data: pd.DataFrame) -> Union[List[XGBRegressor], Tuple[List[XGBRegressor], 'VarianceModel']]:
         """
-        Train 19-fold CV ensemble
+        Train 19-fold CV ensemble (and variance model if MC enabled)
 
         Args:
             train_data: Training data with features and target
 
         Returns:
-            List of trained XGBoost models
+            If ENABLE_MONTE_CARLO=False: List of trained XGBoost models
+            If ENABLE_MONTE_CARLO=True: Tuple of (models, variance_model)
         """
         logger.debug("  Training 19-fold CV ensemble...")
 
@@ -172,6 +195,13 @@ class WalkForwardBacktest:
 
         # Train model on each fold
         models = []
+
+        # Collect validation predictions for variance model training (if MC enabled)
+        if self.mc_enabled:
+            all_X_val = []
+            all_y_val = []
+            all_mean_pred_val = []
+
         for fold_idx, (train_fold, val_fold) in enumerate(folds):
             # Calculate position baselines from THIS FOLD'S training data
             # This prevents temporal leakage
@@ -198,8 +228,49 @@ class WalkForwardBacktest:
             model = self.train_single_model(X_train, y_train, X_val, y_val)
             models.append(model)
 
+            # Collect validation data for variance model (if MC enabled)
+            if self.mc_enabled:
+                # Get mean predictions on validation set
+                mean_pred_val = model.predict(X_val)
+
+                all_X_val.append(X_val)
+                all_y_val.append(y_val.values)
+                all_mean_pred_val.append(mean_pred_val)
+
         logger.debug(f"  Trained {len(models)} models in ensemble")
 
+        # Train variance model (if MC enabled)
+        if self.mc_enabled:
+            logger.info("  Training variance model on validation residuals...")
+
+            try:
+                # Concatenate all validation data
+                X_val_combined = pd.concat(all_X_val, axis=0)
+                y_val_combined = np.concatenate(all_y_val)
+                mean_pred_combined = np.concatenate(all_mean_pred_val)
+
+                # Initialize variance model
+                variance_model = VarianceModel(params=VARIANCE_MODEL_PARAMS)
+
+                # Train on squared residuals
+                variance_model.fit(
+                    X=X_val_combined.values,
+                    y=y_val_combined,
+                    mean_predictions=mean_pred_combined
+                )
+
+                logger.info(f"  Variance model trained on {len(X_val_combined)} validation samples")
+
+                # Return tuple
+                return models, variance_model
+
+            except Exception as e:
+                logger.error(f"  Failed to train variance model: {e}")
+                logger.warning("  Falling back to mean-only predictions (MC disabled)")
+                # Fallback: return models only
+                return models
+
+        # MC disabled: return models only
         return models
 
     def predict_with_ensemble(self,
@@ -224,14 +295,12 @@ class WalkForwardBacktest:
         return ensemble_predictions
 
     def predict_single_day(self,
-                          prediction_date: pd.Timestamp,
-                          position_baselines: pd.DataFrame) -> pd.DataFrame:
+                          prediction_date: pd.Timestamp) -> pd.DataFrame:
         """
         Predict games for a single day
 
         Args:
             prediction_date: Date to predict
-            position_baselines: Pre-calculated position baselines from training data
 
         Returns:
             DataFrame with predictions and actuals
@@ -252,8 +321,26 @@ class WalkForwardBacktest:
             logger.warning(f"  Insufficient training data ({len(train_data)} games), skipping day")
             return pd.DataFrame()
 
-        # Train ensemble
-        models = self.train_ensemble(train_data)
+        # Calculate position baselines from THIS training window (prevents leakage)
+        # This ensures baselines use same historical data as model training
+        if 'position' in train_data.columns:
+            position_baselines = calculate_position_baselines(train_data)
+            logger.debug(f"  Calculated position baselines from {len(train_data)} training games")
+        else:
+            position_baselines = pd.DataFrame()
+            logger.warning(f"  No position column in training data, skipping position baselines")
+
+        # Train ensemble (returns list or tuple depending on MC setting)
+        ensemble_result = self.train_ensemble(train_data)
+
+        # Unpack result - could be list or tuple
+        if self.mc_enabled and isinstance(ensemble_result, tuple):
+            models, variance_model = ensemble_result
+            logger.debug(f"  MC enabled: Received {len(models)} models + variance model")
+        else:
+            models = ensemble_result
+            variance_model = None
+            logger.debug(f"  MC disabled: Received {len(models)} models")
 
         # Apply imputation to test games using training baselines
         games_today_imputed = impute_missing_ctg(games_today, position_baselines)
@@ -272,6 +359,44 @@ class WalkForwardBacktest:
         # Make predictions
         predictions = self.predict_with_ensemble(models, X_test)
 
+        # Generate Monte Carlo predictions if enabled
+        if self.mc_enabled and variance_model is not None:
+            try:
+                logger.debug(f"  Generating MC predictions for {len(X_test)} games")
+
+                # Predict variance
+                variance_pred = variance_model.predict(X_test.values)
+                std_pred = np.sqrt(variance_pred)
+
+                # Fit Gamma distribution parameters
+                alpha, beta = fit_gamma_parameters(predictions, variance_pred)
+
+                # Apply calibration if enabled and calibrator available
+                if ENABLE_CALIBRATION and self.calibrator is not None:
+                    logger.debug("  Applying conformal calibration")
+                    alpha, beta = self.calibrator.apply(alpha, beta)
+
+                # Store MC predictions
+                mc_variance = variance_pred
+                mc_std = std_pred
+                mc_alpha = alpha
+                mc_beta = beta
+
+                logger.debug(f"  MC predictions generated: mean std={np.mean(mc_std):.2f}")
+
+            except Exception as e:
+                logger.warning(f"  Failed to generate MC predictions: {e}")
+                logger.warning("  Continuing with mean-only predictions")
+                mc_variance = None
+                mc_std = None
+                mc_alpha = None
+                mc_beta = None
+        else:
+            mc_variance = None
+            mc_std = None
+            mc_alpha = None
+            mc_beta = None
+
         # Create results dataframe
         results = pd.DataFrame({
             'game_date': games_today['game_date'],
@@ -280,6 +405,14 @@ class WalkForwardBacktest:
             'prediction': predictions,
             'actual_pra': y_test.values
         })
+
+        # Add MC columns if available
+        if mc_variance is not None:
+            results['mc_variance'] = mc_variance
+            results['mc_std'] = mc_std
+            results['mc_alpha'] = mc_alpha
+            results['mc_beta'] = mc_beta
+            logger.debug(f"  Added MC columns to results")
 
         return results
 
@@ -305,16 +438,19 @@ class WalkForwardBacktest:
         logger.info(f"  From: {game_days[0].date()}")
         logger.info(f"  To: {game_days[-1].date()}")
 
-        # Calculate position baselines from ALL historical data before test period
-        # (In a truly realistic setup, this would be calculated before the season)
-        logger.info("\nCalculating position baselines from historical data...")
-        if 'position' in self.all_data.columns:
-            historical_data_before_test = self.all_data[
-                self.all_data['game_date'] < game_days[0]
-            ]
-            position_baselines = calculate_position_baselines(historical_data_before_test)
-        else:
-            position_baselines = pd.DataFrame()
+        # NOTE: Position baselines are now calculated PER PREDICTION DAY from the training window
+        # This prevents temporal leakage by ensuring baselines match what the model sees
+        logger.info("\n✓ Position baselines will be calculated from 3-year training windows (prevents leakage)")
+
+        # Initialize Monte Carlo calibration if enabled
+        calibration_data = []
+        calibration_cutoff = int(len(game_days) * 0.2)  # First 20% of days
+        calibration_fitted = False
+
+        if self.mc_enabled and ENABLE_CALIBRATION:
+            logger.info(f"\nMonte Carlo calibration enabled")
+            logger.info(f"  Will collect calibration data from first {calibration_cutoff} days")
+            logger.info(f"  Then fit conformal calibrator for remaining {len(game_days) - calibration_cutoff} days")
 
         # Iterate through each game day
         all_predictions = []
@@ -322,8 +458,8 @@ class WalkForwardBacktest:
         for day_idx, prediction_date in enumerate(game_days, 1):
             logger.info(f"\n[{day_idx}/{len(game_days)}] Predicting {prediction_date.date()}...")
 
-            # Predict this day
-            day_predictions = self.predict_single_day(prediction_date, position_baselines)
+            # Predict this day (baselines calculated internally from training window)
+            day_predictions = self.predict_single_day(prediction_date)
 
             if day_predictions.empty:
                 continue
@@ -334,7 +470,47 @@ class WalkForwardBacktest:
                 self.odds_data
             )
 
-            # Calculate bet decisions and outcomes
+            # Collect calibration data if in calibration period
+            if self.mc_enabled and ENABLE_CALIBRATION and not calibration_fitted:
+                if day_idx <= calibration_cutoff and 'mc_alpha' in day_predictions.columns:
+                    # Store predictions with actuals for calibration
+                    calibration_rows = day_predictions[
+                        day_predictions[['mc_alpha', 'mc_beta', 'actual_pra']].notna().all(axis=1)
+                    ].copy()
+                    if len(calibration_rows) > 0:
+                        calibration_data.append(calibration_rows)
+                        logger.debug(f"  Collected {len(calibration_rows)} samples for calibration")
+
+                # Fit calibrator after calibration period
+                if day_idx == calibration_cutoff and len(calibration_data) > 0:
+                    try:
+                        logger.info(f"\n{'='*60}")
+                        logger.info("FITTING CONFORMAL CALIBRATOR")
+                        logger.info(f"{'='*60}")
+
+                        # Combine all calibration data
+                        cal_df = pd.concat(calibration_data, ignore_index=True)
+                        logger.info(f"  Calibration dataset: {len(cal_df)} predictions")
+
+                        # Initialize and fit calibrator
+                        self.calibrator = ConformalCalibrator(alpha=CONFORMAL_ALPHA)
+                        self.calibrator.fit(
+                            y_true=cal_df['actual_pra'].values,
+                            mean_pred=cal_df['prediction'].values,
+                            var_pred=cal_df['mc_variance'].values
+                        )
+
+                        calibration_fitted = True
+                        logger.info(f"  ✓ Calibrator fitted successfully")
+                        logger.info(f"  Conformal quantile: {self.calibrator.quantile:.3f}")
+                        logger.info(f"{'='*60}\n")
+
+                    except Exception as e:
+                        logger.error(f"  Failed to fit calibrator: {e}")
+                        logger.warning("  Continuing without calibration")
+                        calibration_fitted = True  # Don't try again
+
+            # Calculate bet decisions and outcomes (original logic)
             bet_decisions = calculate_bet_decisions(
                 day_predictions['prediction'],
                 day_predictions['betting_line']
@@ -347,6 +523,43 @@ class WalkForwardBacktest:
 
             # Merge betting results
             day_predictions = pd.concat([day_predictions, bet_decisions, bet_outcomes], axis=1)
+
+            # Add Monte Carlo betting decisions if enabled
+            if self.mc_enabled and 'mc_alpha' in day_predictions.columns:
+                try:
+                    # Filter to rows with betting lines
+                    has_line = ~day_predictions['betting_line'].isna()
+
+                    if has_line.sum() > 0:
+                        # Calculate P(PRA > line) for each bet
+                        prob_over = calculate_probability_over_line(
+                            alpha=day_predictions.loc[has_line, 'mc_alpha'].values,
+                            beta=day_predictions.loc[has_line, 'mc_beta'].values,
+                            betting_line=day_predictions.loc[has_line, 'betting_line'].values
+                        )
+
+                        # Calculate MC betting decisions
+                        mc_decisions = mc_calculate_bet_decisions(
+                            prob_over=prob_over,
+                            betting_lines=day_predictions.loc[has_line, 'betting_line'].values,
+                            mean_pred=day_predictions.loc[has_line, 'prediction'].values,
+                            std_dev=day_predictions.loc[has_line, 'mc_std'].values,
+                            kelly_fraction=KELLY_FRACTION,
+                            min_edge=MIN_EDGE_KELLY,
+                            min_confidence=MIN_CONFIDENCE,
+                            max_cv=MAX_CV
+                        )
+
+                        # Add MC columns to dataframe
+                        for col in mc_decisions.columns:
+                            day_predictions.loc[has_line, f'mc_{col}'] = mc_decisions[col].values
+
+                        logger.debug(f"  MC betting: {mc_decisions['should_bet_over'].sum()} over, "
+                                   f"{mc_decisions['should_bet_under'].sum()} under bets")
+
+                except Exception as e:
+                    logger.warning(f"  Failed to calculate MC betting decisions: {e}")
+                    # Continue without MC betting columns
 
             # Calculate daily metrics
             mae = mean_absolute_error(day_predictions['actual_pra'], day_predictions['prediction'])

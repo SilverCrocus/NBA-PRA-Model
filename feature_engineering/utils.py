@@ -7,6 +7,8 @@ to reduce code duplication and improve maintainability.
 
 import pandas as pd
 import numpy as np
+import logging
+from pathlib import Path
 from typing import List, Optional
 
 
@@ -319,3 +321,63 @@ def safe_divide(numerator: pd.Series, denominator: pd.Series, fill_value: float 
         dtype: float64
     """
     return (numerator / denominator.replace(0, np.nan)).fillna(fill_value)
+
+
+# ==============================================================================
+# Logging Utilities
+# ==============================================================================
+
+def setup_logging(name: str, level: int = logging.INFO) -> logging.Logger:
+    """
+    Setup logging configuration
+
+    Args:
+        name: Logger name (typically __name__)
+        level: Logging level (default: INFO)
+
+    Returns:
+        Configured logger instance
+
+    Examples:
+        >>> logger = setup_logging(__name__)
+        >>> logger.info("Processing started")
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+
+    # Remove existing handlers to avoid duplicates
+    logger.handlers = []
+
+    # Create console handler
+    handler = logging.StreamHandler()
+    handler.setLevel(level)
+
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    handler.setFormatter(formatter)
+
+    logger.addHandler(handler)
+
+    return logger
+
+
+# ==============================================================================
+# File System Utilities
+# ==============================================================================
+
+def ensure_directory_exists(path: Path) -> None:
+    """
+    Create directory if it doesn't exist
+
+    Args:
+        path: Directory path to create
+
+    Examples:
+        >>> from pathlib import Path
+        >>> ensure_directory_exists(Path("data/output"))
+    """
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)

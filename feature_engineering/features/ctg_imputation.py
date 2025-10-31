@@ -125,11 +125,12 @@ def create_imputation_flags(df: pd.DataFrame) -> pd.DataFrame:
         logger.warning("No 'season' column found, setting is_rookie=0 for all")
         features['is_rookie'] = 0
 
-    # Flag 3: Number of seasons with CTG history (cumulative count per player)
+    # Flag 3: Number of PRIOR seasons with CTG history (prevents leakage)
+    # Uses .shift(1) to exclude current season from count
     if 'player_id' in df.columns:
         features['ctg_seasons_available'] = (
             df.groupby('player_id')['usage_rate']
-            .transform(lambda x: x.notna().expanding().sum())
+            .transform(lambda x: x.notna().shift(1).expanding().sum())
             .fillna(0)
             .astype(int)
         )

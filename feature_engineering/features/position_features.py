@@ -182,11 +182,12 @@ def calculate_position_normalized_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.sort_values(['player_id', 'game_date']).reset_index(drop=True)
 
-    features = df[['player_id', 'game_id', 'game_date']].copy()
-
     # Ensure position exists
     if 'position' not in df.columns:
         df = infer_player_position(df)
+
+    # Include position column in output (needed for backtesting position baselines)
+    features = df[['player_id', 'game_id', 'game_date', 'position']].copy()
 
     # For each stat, calculate position-specific mean and std
     # Then compute z-score for each player
@@ -253,10 +254,10 @@ def calculate_position_percentiles(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.sort_values(['player_id', 'game_date']).reset_index(drop=True)
 
-    features = df[['player_id', 'game_id', 'game_date']].copy()
-
     if 'position' not in df.columns:
         df = infer_player_position(df)
+
+    features = df[['player_id', 'game_id', 'game_date']].copy()
 
     # Calculate rolling 10-game average PRA for each player
     df['pra_avg_last10'] = (
@@ -273,15 +274,32 @@ def calculate_position_percentiles(df: pd.DataFrame) -> pd.DataFrame:
         df_sorted.groupby('position')['pra_avg_last10'].shift(1)
     )
 
-    # Calculate expanding rank (percentile) within position
-    # This compares each game's lagged average to all previous games in that position
+    # Calculate expanding percentile within position (uses only historical games)
+    # For each game, compare to ALL PRIOR games in that position (no future data)
+    def calc_expanding_percentile(x):
+        """Calculate percentile using only prior games (prevents leakage)"""
+        result = []
+        for idx in range(len(x)):
+            if idx == 0 or pd.isna(x.iloc[idx]):
+                # First game or missing data: use median (50th percentile)
+                result.append(50.0)
+            else:
+                current_val = x.iloc[idx]
+                prior_vals = x.iloc[:idx]  # Only games BEFORE current
+                prior_vals_valid = prior_vals.dropna()
+
+                if len(prior_vals_valid) == 0:
+                    result.append(50.0)
+                else:
+                    # Percentile = % of prior games current value exceeds
+                    percentile = (current_val > prior_vals_valid).sum() / len(prior_vals_valid) * 100
+                    result.append(percentile)
+        return pd.Series(result, index=x.index)
+
     df_sorted['pra_position_percentile'] = (
         df_sorted.groupby('position')['pra_avg_lagged']
-        .transform(lambda x: x.rank(pct=True, method='average') * 100)
+        .transform(calc_expanding_percentile)
     )
-
-    # Fill NaN with 50 (median) for first games where no history exists
-    df_sorted['pra_position_percentile'] = df_sorted['pra_position_percentile'].fillna(50)
 
     # Merge back to original order
     features['pra_position_percentile'] = (

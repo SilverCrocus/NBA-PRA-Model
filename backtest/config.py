@@ -77,9 +77,51 @@ XGBOOST_PARAMS = {
     "verbosity": 0  # Suppress XGBoost output
 }
 
+# ==================== MONTE CARLO SETTINGS ====================
+
+# Enable/disable Monte Carlo probabilistic predictions
+ENABLE_MONTE_CARLO = True  # Set to True to use MC predictions (default: False for backwards compatibility)
+
+# Variance model hyperparameters
+VARIANCE_MODEL_PARAMS = {
+    'objective': 'reg:squarederror',
+    'max_depth': 5,              # Shallower than mean model (variance is smoother)
+    'learning_rate': 0.05,
+    'n_estimators': 200,         # Fewer trees than mean model
+    'subsample': 0.8,
+    'colsample_bytree': 0.8,
+    'min_child_weight': 10,      # Higher for stability
+    'reg_alpha': 0.1,
+    'reg_lambda': 1.0,
+    'random_state': 42,
+    'n_jobs': -1,
+    'verbosity': 0
+}
+
+# Distribution fitting
+MC_DISTRIBUTION = 'gamma'           # 'gamma' distribution for PRA (non-negative, right-skewed)
+MC_MIN_VARIANCE = 1.0               # Minimum variance to prevent degenerate distributions
+MC_MAX_VARIANCE = 400.0             # Maximum variance ceiling
+
+# Kelly criterion betting
+KELLY_FRACTION = 0.25               # Fractional Kelly (0.25 = quarter Kelly for risk management)
+MIN_EDGE_KELLY = 0.03               # Minimum 3% edge over breakeven to bet
+MAX_BET_SIZE = 0.25                 # Maximum 25% of bankroll per bet
+
+# Confidence filtering
+MIN_CONFIDENCE = 0.6                # Minimum confidence score (0-1)
+MAX_CV = 0.35                       # Maximum coefficient of variation (std/mean)
+
+# Calibration
+ENABLE_CALIBRATION = True           # Apply conformal calibration
+CONFORMAL_ALPHA = 0.05              # Target 95% coverage (1 - alpha)
+
+# MC probability calculation method
+MC_PROBABILITY_METHOD = 'analytical'  # 'analytical' (fast, exact) or 'monte_carlo' (slower)
+
 # Feature columns to exclude from training
 EXCLUDE_COLUMNS = [
-    'player_id', 'game_id', 'game_date', 'player_name',
+    'player_id', 'game_id', 'game_date', 'player_name', 'position',
     'opponent_team', 'season', 'season_detected', 'pra', 'target_pra',  # Target (both names)
     'points', 'rebounds', 'assists',  # Components of target
     'player', 'player_ctg', 'season_ctg'  # CTG merge artifacts

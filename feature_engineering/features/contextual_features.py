@@ -142,9 +142,11 @@ def create_season_timing_features(df: pd.DataFrame) -> pd.DataFrame:
 
     features = df[['player_id', 'game_id', 'game_date']].copy()
 
-    # Game number in season for this player
+    # Number of prior games this season for this player (prevents leakage)
+    # cumcount() is 0-indexed: game 1 shows 0, game 2 shows 1, etc.
+    # This is correct - we want count of PRIOR games, not current game number
     features['game_number_season'] = (
-        df.groupby(['player_id', 'season']).cumcount() + 1
+        df.groupby(['player_id', 'season']).cumcount()
     )
 
     # Extract month from game date
