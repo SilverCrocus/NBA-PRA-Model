@@ -42,9 +42,33 @@ def check_temporal_leakage(df: pd.DataFrame, filename: str) -> bool:
     """Check for potential temporal leakage"""
     issues = []
 
-    # Check if data is sorted by comparing values (not indices)
-    if not df['game_date'].is_monotonic_increasing:
-        issues.append("Data not sorted by game_date")
+    # Check per-player temporal ordering (CRITICAL for preventing data leakage)
+    # We need monotonicity within each player, not globally
+    # (different players can have overlapping game dates)
+    per_player_sorted = (
+        df.groupby('player_id', group_keys=False)['game_date']
+        .apply(lambda x: x.is_monotonic_increasing)
+        .all()
+    )
+
+    if not per_player_sorted:
+        issues.append("CRITICAL: Data not sorted by game_date within player_id (data leakage risk!)")
+
+    # Check if data is sorted consistently (either [player_id, game_date] or [game_date, player_id])
+    # Both are acceptable as long as per-player monotonicity is maintained
+    grain_cols = ['player_id', 'game_date']
+    if all(col in df.columns for col in grain_cols):
+        sorted_by_player_date = df.index.equals(df.sort_values(['player_id', 'game_date']).index)
+        sorted_by_date_player = df.index.equals(df.sort_values(['game_date', 'player_id']).index)
+
+        if not (sorted_by_player_date or sorted_by_date_player):
+            issues.append("Data not sorted by either ['player_id', 'game_date'] or ['game_date', 'player_id']")
+        else:
+            # Log which sort order is used (informational only)
+            if sorted_by_player_date:
+                logger.info(f"  ℹ️  Sort order: ['player_id', 'game_date']")
+            else:
+                logger.info(f"  ℹ️  Sort order: ['game_date', 'player_id']")
 
     # Check for any columns that might indicate leakage
     suspicious_cols = [col for col in df.columns if 'current' in col.lower() or 'today' in col.lower()]
