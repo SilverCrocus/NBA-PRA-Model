@@ -12,7 +12,7 @@ from scipy import stats
 from typing import Tuple, Union
 
 
-def fit_gamma_parameters(mean: float, variance: float) -> Tuple[float, float]:
+def fit_gamma_parameters(mean: Union[float, np.ndarray], variance: Union[float, np.ndarray]) -> Tuple[Union[float, np.ndarray], Union[float, np.ndarray]]:
     """
     Fit Gamma distribution parameters (alpha, beta) from mean and variance.
 
@@ -26,71 +26,83 @@ def fit_gamma_parameters(mean: float, variance: float) -> Tuple[float, float]:
     - α = mean * β
 
     Args:
-        mean: Expected value (must be positive)
-        variance: Variance (must be positive)
+        mean: Expected value (must be positive), can be scalar or array
+        variance: Variance (must be positive), can be scalar or array
 
     Returns:
-        Tuple of (alpha, beta) parameters
+        Tuple of (alpha, beta) parameters (scalar or array)
 
     Raises:
-        ValueError: If mean or variance <= 0
+        ValueError: If any mean or variance <= 0
     """
-    if mean <= 0:
-        raise ValueError(f"Mean must be positive, got {mean}")
-    if variance <= 0:
-        raise ValueError(f"Variance must be positive, got {variance}")
+    # Convert to numpy arrays for consistent handling
+    mean_arr = np.atleast_1d(mean)
+    var_arr = np.atleast_1d(variance)
 
-    beta = mean / variance
-    alpha = mean * beta
+    # Validate inputs
+    if np.any(mean_arr <= 0):
+        raise ValueError(f"Mean must be positive, got negative/zero values")
+    if np.any(var_arr <= 0):
+        raise ValueError(f"Variance must be positive, got negative/zero values")
+
+    beta = mean_arr / var_arr
+    alpha = mean_arr * beta
+
+    # Return scalar if input was scalar
+    if np.isscalar(mean) and np.isscalar(variance):
+        return float(alpha[0]), float(beta[0])
 
     return alpha, beta
 
 
 def calculate_probability_over_line(
-    mean: float,
-    std_dev: float,
-    line: float,
+    alpha: Union[float, np.ndarray],
+    beta: Union[float, np.ndarray],
+    betting_line: Union[float, np.ndarray],
     method: str = 'analytical'
-) -> float:
+) -> Union[float, np.ndarray]:
     """
-    Calculate P(PRA > line) using Gamma distribution.
+    Calculate P(PRA > betting_line) using Gamma distribution.
 
     Args:
-        mean: Mean prediction
-        std_dev: Standard deviation
-        line: Betting line
+        alpha: Gamma shape parameter(s)
+        beta: Gamma rate parameter(s)
+        betting_line: Betting line(s)
         method: 'analytical' (fast) or 'monte_carlo' (slow but accurate)
 
     Returns:
-        Probability that actual PRA exceeds line (0-1)
+        Probability that actual PRA exceeds line (0-1), scalar or array
     """
-    if std_dev <= 0:
-        # No uncertainty: deterministic prediction
-        return 1.0 if mean > line else 0.0
-
-    variance = std_dev ** 2
-
-    try:
-        alpha, beta = fit_gamma_parameters(mean, variance)
-    except ValueError:
-        # Fallback to normal distribution if Gamma fails
-        return 1 - stats.norm.cdf(line, loc=mean, scale=std_dev)
+    # Convert to arrays for vectorized operations
+    alpha_arr = np.atleast_1d(alpha)
+    beta_arr = np.atleast_1d(beta)
+    line_arr = np.atleast_1d(betting_line)
 
     if method == 'analytical':
         # Use survival function: P(X > line) = 1 - CDF(line)
-        prob_over = 1 - stats.gamma.cdf(line, a=alpha, scale=1/beta)
+        # Gamma CDF uses shape=alpha, scale=1/beta parameterization
+        prob_over = 1 - stats.gamma.cdf(line_arr, a=alpha_arr, scale=1/beta_arr)
 
     elif method == 'monte_carlo':
         # Monte Carlo simulation (slower but more flexible)
         n_samples = 10000
-        samples = np.random.gamma(alpha, scale=1/beta, size=n_samples)
-        prob_over = np.mean(samples > line)
+        prob_over = np.zeros_like(alpha_arr, dtype=float)
+
+        for i in range(len(alpha_arr)):
+            samples = np.random.gamma(alpha_arr[i], scale=1/beta_arr[i], size=n_samples)
+            prob_over[i] = np.mean(samples > line_arr[i])
 
     else:
         raise ValueError(f"Unknown method: {method}")
 
     # Ensure probability is in valid range
-    return np.clip(prob_over, 0.0, 1.0)
+    prob_over = np.clip(prob_over, 0.0, 1.0)
+
+    # Return scalar if inputs were scalar
+    if np.isscalar(alpha) and np.isscalar(beta) and np.isscalar(betting_line):
+        return float(prob_over[0])
+
+    return prob_over
 
 
 def american_odds_to_probability(odds: int) -> float:

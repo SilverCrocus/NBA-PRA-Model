@@ -81,11 +81,13 @@ def test_predictor_probability_calculation(mock_ensemble_data):
 
     mean = 25.0
     std_dev = 4.0
+    variance = std_dev ** 2
     line = 23.5
 
     # Calculate probability using internal method
-    from production.monte_carlo import calculate_probability_over_line
-    prob_over = calculate_probability_over_line(mean, std_dev, line)
+    from production.monte_carlo import calculate_probability_over_line, fit_gamma_parameters
+    alpha, beta = fit_gamma_parameters(mean, variance)
+    prob_over = calculate_probability_over_line(alpha, beta, line)
 
     assert 0 <= prob_over <= 1
     assert prob_over > 0.5  # Line below mean, so prob should be > 0.5
@@ -110,47 +112,55 @@ def test_predictor_with_missing_features(mock_ensemble_data, sample_features_df)
 
 def test_predictor_probability_over_line():
     """Test probability calculation for various scenarios"""
-    from production.monte_carlo import calculate_probability_over_line
+    from production.monte_carlo import calculate_probability_over_line, fit_gamma_parameters
 
     # Scenario 1: Line below mean (should have high prob)
-    prob1 = calculate_probability_over_line(mean=30.0, std_dev=5.0, line=25.0)
+    alpha1, beta1 = fit_gamma_parameters(30.0, 5.0 ** 2)
+    prob1 = calculate_probability_over_line(alpha1, beta1, 25.0)
     assert prob1 > 0.6
 
     # Scenario 2: Line above mean (should have low prob)
-    prob2 = calculate_probability_over_line(mean=30.0, std_dev=5.0, line=35.0)
+    alpha2, beta2 = fit_gamma_parameters(30.0, 5.0 ** 2)
+    prob2 = calculate_probability_over_line(alpha2, beta2, 35.0)
     assert prob2 < 0.4
 
     # Scenario 3: Line equal to mean (should be ~0.5)
-    prob3 = calculate_probability_over_line(mean=30.0, std_dev=5.0, line=30.0)
+    alpha3, beta3 = fit_gamma_parameters(30.0, 5.0 ** 2)
+    prob3 = calculate_probability_over_line(alpha3, beta3, 30.0)
     assert 0.45 <= prob3 <= 0.55
 
 
 def test_predictor_zero_variance():
     """Test prediction with zero/very low variance"""
-    from production.monte_carlo import calculate_probability_over_line
+    from production.monte_carlo import calculate_probability_over_line, fit_gamma_parameters
 
     # Zero variance case
     mean = 25.0
     std_dev = 0.01  # Very small
+    variance = std_dev ** 2
 
     # Line below mean
-    prob_over = calculate_probability_over_line(mean, std_dev, 24.0)
+    alpha, beta = fit_gamma_parameters(mean, variance)
+    prob_over = calculate_probability_over_line(alpha, beta, 24.0)
     assert prob_over > 0.99  # Should be near certainty
 
     # Line above mean
-    prob_under = calculate_probability_over_line(mean, std_dev, 26.0)
+    alpha2, beta2 = fit_gamma_parameters(mean, variance)
+    prob_under = calculate_probability_over_line(alpha2, beta2, 26.0)
     assert prob_under < 0.01  # Should be near zero
 
 
 def test_predictor_large_variance():
     """Test prediction with large variance"""
-    from production.monte_carlo import calculate_probability_over_line
+    from production.monte_carlo import calculate_probability_over_line, fit_gamma_parameters
 
     mean = 25.0
     std_dev = 10.0  # Large uncertainty
+    variance = std_dev ** 2
     line = 25.0
 
-    prob_over = calculate_probability_over_line(mean, std_dev, line)
+    alpha, beta = fit_gamma_parameters(mean, variance)
+    prob_over = calculate_probability_over_line(alpha, beta, line)
 
     # With large variance at mean, probability should still be near 0.5
     assert 0.4 <= prob_over <= 0.6
@@ -186,12 +196,14 @@ def test_predictor_generate_predictions(mock_ensemble_data, sample_features_df):
 
 def test_predictor_edge_cases():
     """Test edge cases for probability calculations"""
-    from production.monte_carlo import calculate_probability_over_line
+    from production.monte_carlo import calculate_probability_over_line, fit_gamma_parameters
 
     # Very high mean vs low line
-    prob_high = calculate_probability_over_line(mean=50.0, std_dev=3.0, line=20.0)
+    alpha_high, beta_high = fit_gamma_parameters(50.0, 3.0 ** 2)
+    prob_high = calculate_probability_over_line(alpha_high, beta_high, 20.0)
     assert prob_high > 0.999
 
     # Very low mean vs high line
-    prob_low = calculate_probability_over_line(mean=10.0, std_dev=2.0, line=30.0)
+    alpha_low, beta_low = fit_gamma_parameters(10.0, 2.0 ** 2)
+    prob_low = calculate_probability_over_line(alpha_low, beta_low, 30.0)
     assert prob_low < 0.001

@@ -359,11 +359,13 @@ def test_ledger_roi_calculation(clean_ledger):
     summary = get_ledger_summary()
 
     # ROI should be calculated
-    # Win: +0.10 (at -110 odds, win ~0.091)
-    # Loss: -0.10
-    # Net: approximately 0 (slightly negative due to -110 odds)
+    # Win: +0.10 * 0.91 = 0.091
+    # Loss: -0.10 * 1.0 = -0.10
+    # Net profit: -0.009
+    # Total wagered: 0.20
+    # ROI: -4.5%
     if 'roi' in summary:
-        assert -0.2 <= summary['roi'] <= 0.2  # Should be near breakeven
+        assert -5.0 <= summary['roi'] <= -4.0  # Expected -4.5% with -110 odds
 
 
 def test_ledger_multiple_dates(clean_ledger):

@@ -50,9 +50,12 @@ def test_calculate_probability_over_line():
     """Test probability calculation for betting lines"""
     mean = 25.0
     std_dev = 4.0
+    variance = std_dev ** 2
     line = 23.5
 
-    prob = calculate_probability_over_line(mean, std_dev, line)
+    # Convert to Gamma parameters
+    alpha, beta = fit_gamma_parameters(mean, variance)
+    prob = calculate_probability_over_line(alpha, beta, line)
 
     # Probability should be between 0 and 1
     assert 0 <= prob <= 1
@@ -61,11 +64,13 @@ def test_calculate_probability_over_line():
     assert prob > 0.5
 
     # When line = mean, probability should be ~ 0.5
-    prob_equal = calculate_probability_over_line(mean, std_dev, mean)
+    alpha_eq, beta_eq = fit_gamma_parameters(mean, variance)
+    prob_equal = calculate_probability_over_line(alpha_eq, beta_eq, mean)
     assert abs(prob_equal - 0.5) < 0.05
 
     # When line > mean, probability should be < 0.5
-    prob_over = calculate_probability_over_line(mean, std_dev, mean + 5)
+    alpha_over, beta_over = fit_gamma_parameters(mean, variance)
+    prob_over = calculate_probability_over_line(alpha_over, beta_over, mean + 5)
     assert prob_over < 0.5
 
 

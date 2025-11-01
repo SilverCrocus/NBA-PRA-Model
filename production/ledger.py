@@ -143,7 +143,13 @@ def get_ledger_summary():
     """
     if not LEDGER_FILE.exists():
         logger.warning("Ledger file does not exist")
-        return {}
+        return {
+            'total_bets': 0,
+            'completed_bets': 0,
+            'pending_bets': 0,
+            'win_rate': None,
+            'roi': None
+        }
 
     ledger = pd.read_csv(LEDGER_FILE)
 
@@ -164,10 +170,20 @@ def get_ledger_summary():
     losses = (completed['status'] == 'lost').sum()
     win_rate = wins / (wins + losses)
 
-    # Simple ROI calculation (assuming -110 odds)
-    # Win: +0.91 units, Loss: -1 unit
-    total_profit = wins * 0.91 - losses * 1.0
-    total_wagered = wins + losses
+    # ROI calculation using kelly_size (assuming -110 odds)
+    # Win: +0.91 * kelly_size profit, Loss: -1.0 * kelly_size loss
+    if 'kelly_size' in completed.columns:
+        # Calculate profit/loss using actual kelly sizes
+        won_bets = completed[completed['status'] == 'won']
+        lost_bets = completed[completed['status'] == 'lost']
+
+        total_profit = (won_bets['kelly_size'] * 0.91).sum() - lost_bets['kelly_size'].sum()
+        total_wagered = completed['kelly_size'].sum()
+    else:
+        # Fallback: assume 1 unit per bet
+        total_profit = wins * 0.91 - losses * 1.0
+        total_wagered = wins + losses
+
     roi = (total_profit / total_wagered) * 100 if total_wagered > 0 else 0
 
     summary = {

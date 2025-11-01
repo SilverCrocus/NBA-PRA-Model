@@ -12,7 +12,7 @@ from datetime import datetime
 import argparse
 from typing import List, Dict, Tuple
 
-from model_training.utils import prepare_features_target, setup_logging
+from model_training.utils import prepare_features_target, setup_logger
 from model_training.config import (
     FEATURE_DIR,
     PROCESSED_DIR,
