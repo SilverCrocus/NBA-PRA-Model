@@ -649,6 +649,8 @@ def build_rolling_features() -> pd.DataFrame:
 
     # Save to parquet
     output_path = FEATURE_DIR / "rolling_features.parquet"
+    # Sort by game_date and player_id for temporal validation
+    features = features.sort_values(['game_date', 'player_id'])
     features.to_parquet(output_path, index=False)
 
     logger.info(f"\n✓ Saved rolling features to {output_path}")
