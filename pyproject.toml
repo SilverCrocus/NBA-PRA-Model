@@ -42,3 +42,9 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["production*", "feature_engineering*", "model_training*"]
 exclude = ["tests*", "docs*", "data*", "logs*", "mlruns*", "models*", "research*", "analysis*", "validation*", "backtest*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests (end-to-end workflows)",
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
