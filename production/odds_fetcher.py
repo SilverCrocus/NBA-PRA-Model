@@ -1,18 +1,16 @@
 """
 Odds Fetcher Module
 
+High-level wrapper around odds provider abstraction.
 Integrates with TheOddsAPI to fetch NBA player prop betting lines.
 
 Author: NBA PRA Prediction System
-Date: 2025-10-31
+Date: 2025-11-01 (Refactored with provider abstraction)
 """
 
-import requests
 import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
-import time
+from typing import Optional
 import logging
 
 from production.config import (
@@ -25,13 +23,38 @@ from production.config import (
     ODDS_API_RATE_LIMIT_DELAY,
     setup_logging
 )
+from production.odds_providers import TheOddsAPIProvider
 
 logger = setup_logging('odds_fetcher')
 
 
+def get_odds_provider(api_key: Optional[str] = None) -> TheOddsAPIProvider:
+    """
+    Get configured odds provider.
+
+    Args:
+        api_key: Optional API key override (defaults to config)
+
+    Returns:
+        Configured TheOddsAPIProvider instance
+    """
+    return TheOddsAPIProvider(
+        api_key=api_key or ODDS_API_KEY,
+        base_url=ODDS_API_BASE_URL,
+        sport=ODDS_SPORT,
+        regions=ODDS_REGIONS,
+        markets=ODDS_MARKETS,
+        odds_format=ODDS_FORMAT,
+        rate_limit_delay=ODDS_API_RATE_LIMIT_DELAY
+    )
+
+
 class OddsFetcher:
     """
-    Fetches NBA player prop betting lines from TheOddsAPI
+    Fetches NBA player prop betting lines using provider abstraction.
+
+    DEPRECATED: This class is maintained for backward compatibility.
+    New code should use get_odds_provider() directly.
 
     Features:
     - Fetch upcoming NBA games
@@ -48,56 +71,20 @@ class OddsFetcher:
         Args:
             api_key: TheOddsAPI key (defaults to config)
         """
-        self.api_key = api_key or ODDS_API_KEY
-        self.base_url = ODDS_API_BASE_URL
-        self.sport = ODDS_SPORT
-        self.regions = ODDS_REGIONS
-        self.markets = ODDS_MARKETS
-        self.odds_format = ODDS_FORMAT
-        self.rate_limit_delay = ODDS_API_RATE_LIMIT_DELAY
+        # Use the provider abstraction
+        self.provider = get_odds_provider(api_key)
+
+        # Keep these for backward compatibility
+        self.api_key = self.provider.api_key
+        self.base_url = self.provider.base_url
+        self.sport = self.provider.sport
+        self.regions = self.provider.regions
+        self.markets = self.provider.markets
+        self.odds_format = self.provider.odds_format
+        self.rate_limit_delay = self.provider.rate_limit_delay
 
         logger.info(f"OddsFetcher initialized with API key: {self.api_key[:8]}...")
 
-    def _make_request(self, endpoint: str, params: Dict) -> Optional[Dict]:
-        """
-        Make API request with error handling
-
-        Args:
-            endpoint: API endpoint (e.g., '/sports/basketball_nba/events')
-            params: Query parameters
-
-        Returns:
-            JSON response or None if error
-        """
-        url = f"{self.base_url}{endpoint}"
-        params['apiKey'] = self.api_key
-
-        try:
-            logger.debug(f"Making request to: {endpoint}")
-            response = requests.get(url, params=params, timeout=30)
-            response.raise_for_status()
-
-            # Check remaining quota
-            if 'x-requests-remaining' in response.headers:
-                remaining = response.headers['x-requests-remaining']
-                logger.info(f"API requests remaining: {remaining}")
-
-            # Rate limiting
-            time.sleep(self.rate_limit_delay)
-
-            return response.json()
-
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"HTTP error: {e}")
-            if response.status_code == 401:
-                logger.error("Invalid API key")
-            elif response.status_code == 429:
-                logger.error("Rate limit exceeded")
-            return None
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request error: {e}")
-            return None
 
     def get_upcoming_games(self, date_filter: Optional[str] = None) -> pd.DataFrame:
         """
@@ -109,22 +96,18 @@ class OddsFetcher:
         Returns:
             DataFrame with columns: event_id, home_team, away_team, commence_time
         """
-        endpoint = f"/sports/{self.sport}/events"
-        params = {
-            'dateFormat': 'iso',
-            'oddsFormat': self.odds_format
-        }
-
         logger.info("Fetching upcoming NBA games...")
-        data = self._make_request(endpoint, params)
 
-        if not data:
+        # Delegate to provider
+        games = self.provider.fetch_upcoming_games(target_date=date_filter)
+
+        if not games:
             logger.warning("No games data received")
             return pd.DataFrame()
 
-        # Parse response
-        games = []
-        for event in data:
+        # Convert to DataFrame format expected by existing code
+        games_list = []
+        for event in games:
             game = {
                 'event_id': event['id'],
                 'home_team': event['home_team'],
@@ -132,21 +115,13 @@ class OddsFetcher:
                 'commence_time': pd.to_datetime(event['commence_time']),
                 'completed': event.get('completed', False)
             }
-            games.append(game)
+            games_list.append(game)
 
-        df = pd.DataFrame(games)
+        df = pd.DataFrame(games_list)
 
         # Filter for upcoming games only
         now = pd.Timestamp.now(tz='UTC')
         df = df[df['commence_time'] > now].copy()
-
-        # Optional date filter (convert UTC to EST for comparison)
-        if date_filter:
-            # Convert UTC times to EST for date comparison
-            df['commence_time_est'] = df['commence_time'].dt.tz_convert('US/Eastern')
-            target_date = pd.to_datetime(date_filter).date()
-            df = df[df['commence_time_est'].dt.date == target_date].copy()
-            df = df.drop(columns=['commence_time_est'])  # Clean up temp column
 
         logger.info(f"Found {len(df)} upcoming games")
         return df
@@ -159,24 +134,22 @@ class OddsFetcher:
             event_id: TheOddsAPI event ID
 
         Returns:
-            DataFrame with player props
+            DataFrame with player props (raw format for backward compatibility)
         """
-        endpoint = f"/sports/{self.sport}/events/{event_id}/odds"
-        params = {
-            'regions': self.regions,
-            'markets': self.markets,
-            'oddsFormat': self.odds_format,
-            'dateFormat': 'iso'
-        }
-
         logger.debug(f"Fetching props for event: {event_id}")
-        data = self._make_request(endpoint, params)
+
+        # Delegate to provider
+        try:
+            data = self.provider.fetch_player_props(event_id)
+        except Exception as e:
+            logger.warning(f"No props data for event: {event_id}: {e}")
+            return pd.DataFrame()
 
         if not data:
             logger.warning(f"No props data for event: {event_id}")
             return pd.DataFrame()
 
-        # Parse response
+        # Parse response to old format for backward compatibility
         props = []
 
         try:
