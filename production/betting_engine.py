@@ -11,7 +11,6 @@ Date: 2025-10-31
 import pandas as pd
 import numpy as np
 from typing import Optional
-import logging
 
 # Add project root to path
 import sys
@@ -27,9 +26,10 @@ from production.config import (
     MIN_CONFIDENCE,
     MAX_CV,
     BETTING_ODDS,
-    BETS_DIR,
-    setup_logging
+    BETS_DIR
 )
+from production.logging_config import setup_production_logging
+from production.exceptions import BettingEngineError, PredictionError
 from production.ledger import add_bets_to_ledger
 
 # Import Monte Carlo utilities
@@ -39,7 +39,7 @@ from production.monte_carlo import (
     calculate_kelly_fraction
 )
 
-logger = setup_logging('betting_engine')
+logger = setup_production_logging('betting_engine')
 
 
 class BettingEngine:

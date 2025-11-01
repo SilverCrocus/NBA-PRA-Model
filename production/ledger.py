@@ -10,7 +10,6 @@ Date: 2025-10-31
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
-import logging
 
 # Add project root to path
 import sys
@@ -18,9 +17,10 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from production.config import BETS_DIR, setup_logging
+from production.config import BETS_DIR
+from production.logging_config import setup_production_logging
 
-logger = setup_logging('ledger')
+logger = setup_production_logging('ledger')
 
 LEDGER_DIR = Path(__file__).parent / "outputs" / "ledger"
 LEDGER_DIR.mkdir(parents=True, exist_ok=True)

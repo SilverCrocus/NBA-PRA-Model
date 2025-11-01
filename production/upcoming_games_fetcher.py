@@ -12,15 +12,16 @@ import numpy as np
 from datetime import datetime
 import time
 from pathlib import Path
-import logging
 from typing import List, Dict, Optional
 
 from nba_api.stats.endpoints import scoreboardv2, commonteamroster
 from nba_api.stats.static import teams
 
-from production.config import MASTER_FEATURES_PATH, setup_logging
+from production.config import MASTER_FEATURES_PATH
+from production.logging_config import setup_production_logging
+from production.exceptions import FeatureDataError
 
-logger = setup_logging('upcoming_games_fetcher')
+logger = setup_production_logging('upcoming_games_fetcher')
 
 
 def get_upcoming_games(target_date: str) -> pd.DataFrame:

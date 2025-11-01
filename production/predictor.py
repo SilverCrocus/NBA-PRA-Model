@@ -12,7 +12,6 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Tuple, Dict, Optional, List
-import logging
 
 # Add project root to path
 import sys
@@ -26,8 +25,14 @@ from production.config import (
     ENABLE_MONTE_CARLO,
     MC_PROBABILITY_METHOD,
     MIN_CAREER_GAMES,
-    MIN_RECENT_GAMES,
-    setup_logging
+    MIN_RECENT_GAMES
+)
+from production.logging_config import setup_production_logging
+from production.exceptions import (
+    ModelNotFoundError,
+    FeatureDataError,
+    PredictionError,
+    InsufficientDataError
 )
 from production.model_trainer import ProductionModelTrainer
 from production.upcoming_games_fetcher import get_upcoming_game_features
@@ -39,7 +44,7 @@ if ENABLE_MONTE_CARLO:
         calculate_probability_over_line
     )
 
-logger = setup_logging('predictor')
+logger = setup_production_logging('predictor')
 
 
 class ProductionPredictor:

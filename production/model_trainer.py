@@ -14,7 +14,6 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Tuple, List, Dict, Optional
 import pickle
-import logging
 from xgboost import XGBRegressor
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -34,15 +33,20 @@ from production.config import (
     EXCLUDE_COLUMNS,
     XGBOOST_PARAMS,
     VARIANCE_MODEL_PARAMS,
-    ENABLE_MONTE_CARLO,
-    setup_logging
+    ENABLE_MONTE_CARLO
+)
+from production.logging_config import setup_production_logging
+from production.exceptions import (
+    ModelNotFoundError,
+    FeatureDataError,
+    PredictionError
 )
 
 # Import Monte Carlo modules if enabled
 if ENABLE_MONTE_CARLO:
     from backtest.monte_carlo.variance_model import VarianceModel
 
-logger = setup_logging('model_trainer')
+logger = setup_production_logging('model_trainer')
 
 
 class ProductionModelTrainer:

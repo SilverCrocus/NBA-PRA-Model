@@ -11,7 +11,7 @@ Date: 2025-11-01 (Refactored with provider abstraction)
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional
-import logging
+import time
 
 from production.config import (
     ODDS_API_KEY,
@@ -20,12 +20,13 @@ from production.config import (
     ODDS_REGIONS,
     ODDS_MARKETS,
     ODDS_FORMAT,
-    ODDS_API_RATE_LIMIT_DELAY,
-    setup_logging
+    ODDS_API_RATE_LIMIT_DELAY
 )
-from production.odds_providers import TheOddsAPIProvider
+from production.logging_config import setup_production_logging
+from production.exceptions import OddsAPIError
+from production.odds_providers import TheOddsAPIProvider, OddsProviderError
 
-logger = setup_logging('odds_fetcher')
+logger = setup_production_logging('odds_fetcher')
 
 
 def get_odds_provider(api_key: Optional[str] = None) -> TheOddsAPIProvider:
@@ -86,6 +87,37 @@ class OddsFetcher:
         logger.info(f"OddsFetcher initialized with API key: {self.api_key[:8]}...")
 
 
+    def _fetch_with_retry(self, fetch_func, max_retries: int = 3, *args, **kwargs):
+        """
+        Execute fetch function with exponential backoff retry logic.
+
+        Args:
+            fetch_func: Function to call with retry logic
+            max_retries: Maximum number of retry attempts
+            *args, **kwargs: Arguments to pass to fetch_func
+
+        Returns:
+            Result from fetch_func
+
+        Raises:
+            OddsAPIError: If all retries fail
+        """
+        for attempt in range(max_retries):
+            try:
+                return fetch_func(*args, **kwargs)
+            except OddsProviderError as e:
+                if attempt == max_retries - 1:
+                    # Last attempt failed, raise as OddsAPIError
+                    raise OddsAPIError(f"Failed after {max_retries} attempts: {e}") from e
+
+                # Calculate exponential backoff wait time
+                wait_time = 2 ** attempt
+                logger.warning(
+                    f"API call failed (attempt {attempt + 1}/{max_retries}), "
+                    f"retrying in {wait_time}s: {e}"
+                )
+                time.sleep(wait_time)
+
     def get_upcoming_games(self, date_filter: Optional[str] = None) -> pd.DataFrame:
         """
         Get upcoming NBA games
@@ -98,8 +130,15 @@ class OddsFetcher:
         """
         logger.info("Fetching upcoming NBA games...")
 
-        # Delegate to provider
-        games = self.provider.fetch_upcoming_games(target_date=date_filter)
+        # Delegate to provider with retry logic
+        try:
+            games = self._fetch_with_retry(
+                self.provider.fetch_upcoming_games,
+                target_date=date_filter
+            )
+        except OddsAPIError as e:
+            logger.error(f"Failed to fetch upcoming games: {e}")
+            return pd.DataFrame()
 
         if not games:
             logger.warning("No games data received")
@@ -138,10 +177,13 @@ class OddsFetcher:
         """
         logger.debug(f"Fetching props for event: {event_id}")
 
-        # Delegate to provider
+        # Delegate to provider with retry logic
         try:
-            data = self.provider.fetch_player_props(event_id)
-        except Exception as e:
+            data = self._fetch_with_retry(
+                self.provider.fetch_player_props,
+                event_id=event_id
+            )
+        except OddsAPIError as e:
             logger.warning(f"No props data for event: {event_id}: {e}")
             return pd.DataFrame()
 

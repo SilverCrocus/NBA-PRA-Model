@@ -16,7 +16,6 @@ Date: 2025-11-01
 import click
 from pathlib import Path
 from datetime import datetime, timedelta
-import logging
 import sys
 import pytz
 import pandas as pd
@@ -30,9 +29,9 @@ if str(project_root) not in sys.path:
 from production.config import (
     PREDICTIONS_DIR,
     BETS_DIR,
-    LOGS_DIR,
-    setup_logging
+    LOGS_DIR
 )
+from production.logging_config import setup_production_logging
 from production.model_trainer import (
     train_production_models,
     get_latest_model_path,
@@ -42,7 +41,7 @@ from production.odds_fetcher import OddsFetcher
 from production.predictor import ProductionPredictor
 from production.betting_engine import BettingEngine
 
-logger = setup_logging('cli')
+logger = setup_production_logging('cli')
 
 
 @click.group()
