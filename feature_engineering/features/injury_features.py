@@ -504,6 +504,8 @@ def build_injury_features() -> pd.DataFrame:
 
     # Save
     output_path = FEATURE_DIR / "injury_features.parquet"
+    # Sort by grain columns before save for consistent ordering
+    features = features.sort_values(['player_id', 'game_date']).reset_index(drop=True)
     features.to_parquet(output_path, index=False)
 
     logger.info(f"\n✓ Saved injury features to {output_path}")
