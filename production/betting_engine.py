@@ -32,10 +32,11 @@ from production.config import (
 )
 from production.ledger import add_bets_to_ledger
 
-# Import Monte Carlo betting calculator
-from backtest.monte_carlo.betting_calculator import (
-    calculate_bet_decisions as mc_calculate_bet_decisions,
-    analyze_bet_distribution
+# Import Monte Carlo utilities
+from production.monte_carlo import (
+    american_odds_to_probability,
+    calculate_bet_edge,
+    calculate_kelly_fraction
 )
 
 logger = setup_logging('betting_engine')
@@ -83,31 +84,98 @@ class BettingEngine:
 
         # Extract arrays
         prob_over = predictions['prob_over'].values
+        prob_under = 1 - prob_over
         betting_lines = predictions['betting_line'].values
         mean_pred = predictions['mean_pred'].values
         std_dev = predictions['std_dev'].values
 
-        # Use Monte Carlo betting calculator
-        decisions = mc_calculate_bet_decisions(
-            prob_over=prob_over,
-            betting_lines=betting_lines,
-            mean_pred=mean_pred,
-            std_dev=std_dev,
-            odds=BETTING_ODDS,
-            kelly_fraction=KELLY_FRACTION,
-            min_edge=MIN_EDGE_KELLY,
-            min_confidence=MIN_CONFIDENCE,
-            max_cv=MAX_CV
-        )
+        # Calculate breakeven probability
+        breakeven_prob = american_odds_to_probability(BETTING_ODDS)
 
-        # Merge with metadata
-        for col in predictions.columns:
-            if col not in decisions.columns:
-                decisions[col] = predictions[col].values
+        # Calculate edges
+        edge_over = prob_over - breakeven_prob
+        edge_under = prob_under - breakeven_prob
+
+        # Calculate Kelly sizes
+        kelly_size_over = self._calculate_kelly_sizes(prob_over, BETTING_ODDS, KELLY_FRACTION, MIN_EDGE_KELLY)
+        kelly_size_under = self._calculate_kelly_sizes(prob_under, BETTING_ODDS, KELLY_FRACTION, MIN_EDGE_KELLY)
+
+        # Calculate confidence metrics
+        confidence_score = np.abs(prob_over - 0.5) / 0.5
+        cv = std_dev / (mean_pred + 1e-6)
+
+        # Apply confidence filter
+        confidence_mask = (confidence_score >= MIN_CONFIDENCE) & (cv <= MAX_CV)
+
+        # Determine which bets to make
+        should_bet_over = (edge_over >= MIN_EDGE_KELLY) & confidence_mask
+        should_bet_under = (edge_under >= MIN_EDGE_KELLY) & confidence_mask
+
+        # Final bet sizes (zero if filtered out)
+        bet_size_over = np.where(should_bet_over, kelly_size_over, 0)
+        bet_size_under = np.where(should_bet_under, kelly_size_under, 0)
+
+        # Create decisions DataFrame
+        decisions = predictions.copy()
+        decisions['prob_under'] = prob_under
+        decisions['edge_over'] = edge_over
+        decisions['edge_under'] = edge_under
+        decisions['kelly_size_over'] = kelly_size_over
+        decisions['kelly_size_under'] = kelly_size_under
+        decisions['confidence_score'] = confidence_score
+        decisions['cv'] = cv
+        decisions['should_bet_over'] = should_bet_over
+        decisions['should_bet_under'] = should_bet_under
+        decisions['bet_size_over'] = bet_size_over
+        decisions['bet_size_under'] = bet_size_under
 
         logger.info(f"Generated {len(decisions)} betting decision rows")
+        logger.info(f"  {should_bet_over.sum()} over bets, {should_bet_under.sum()} under bets")
 
         return decisions
+
+    def _calculate_kelly_sizes(self, prob_win: np.ndarray, odds: float,
+                              kelly_fraction: float, min_edge: float) -> np.ndarray:
+        """
+        Calculate Kelly criterion bet sizing.
+
+        Args:
+            prob_win: Win probabilities
+            odds: American odds
+            kelly_fraction: Fraction of full Kelly
+            min_edge: Minimum edge required
+
+        Returns:
+            Bet sizes as fraction of bankroll
+        """
+        # Convert American odds to decimal payoff
+        if odds < 0:
+            payoff = 100 / abs(odds)
+        else:
+            payoff = odds / 100
+
+        # Calculate breakeven probability
+        breakeven_prob = 1 / (1 + payoff)
+
+        # Calculate edge
+        edge = prob_win - breakeven_prob
+
+        # Full Kelly sizing
+        full_kelly = (prob_win * payoff - (1 - prob_win)) / payoff
+
+        # Apply Kelly fraction
+        bet_sizes = full_kelly * kelly_fraction
+
+        # Zero out bets with insufficient edge
+        bet_sizes = np.where(edge >= min_edge, bet_sizes, 0)
+
+        # Zero out negative bet sizes
+        bet_sizes = np.maximum(bet_sizes, 0)
+
+        # Cap at kelly_fraction
+        bet_sizes = np.minimum(bet_sizes, kelly_fraction)
+
+        return bet_sizes
 
     def filter_to_bets(self, decisions: pd.DataFrame) -> pd.DataFrame:
         """

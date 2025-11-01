@@ -34,7 +34,7 @@ from production.upcoming_games_fetcher import get_upcoming_game_features
 
 # Monte Carlo imports
 if ENABLE_MONTE_CARLO:
-    from backtest.monte_carlo.distribution_fitting import (
+    from production.monte_carlo import (
         fit_gamma_parameters,
         calculate_probability_over_line,
         calculate_std_dev
