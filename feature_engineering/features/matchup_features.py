@@ -345,6 +345,8 @@ def build_matchup_features() -> pd.DataFrame:
 
     # Save
     output_path = FEATURE_DIR / "matchup_features.parquet"
+    # Sort by player and game_date for temporal validation
+    features = features.sort_values(['player_id', 'game_date'])
     features.to_parquet(output_path, index=False)
 
     logger.info(f"\n✓ Saved matchup features to {output_path}")
