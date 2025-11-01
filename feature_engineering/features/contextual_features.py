@@ -340,6 +340,9 @@ def build_contextual_features() -> pd.DataFrame:
     logger.info("\nValidating contextual features...")
     validate_contextual_features(features)
 
+    # Sort by player and game_date for temporal validation
+    features = features.sort_values(['player_id', 'game_date'])
+
     # Save
     output_path = FEATURE_DIR / "contextual_features.parquet"
     features.to_parquet(output_path, index=False)
