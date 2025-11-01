@@ -501,8 +501,9 @@ def build_position_features() -> pd.DataFrame:
     logger.info("\nValidating position features...")
     validate_position_features(features)
 
-    # Save
+    # Save (sort by player_id and game_date for consistency)
     output_path = FEATURE_DIR / "position_features.parquet"
+    features = features.sort_values(['player_id', 'game_date']).reset_index(drop=True)
     features.to_parquet(output_path, index=False)
 
     logger.info(f"\n✓ Saved position features to {output_path}")
