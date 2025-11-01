@@ -464,6 +464,8 @@ def build_advanced_metrics() -> pd.DataFrame:
 
     # Save
     output_path = FEATURE_DIR / "advanced_metrics.parquet"
+    # Sort by player_id and game_date to ensure chronological order within each player
+    features = features.sort_values(['player_id', 'game_date'])
     features.to_parquet(output_path, index=False)
 
     logger.info(f"\n✓ Saved advanced metrics to {output_path}")
