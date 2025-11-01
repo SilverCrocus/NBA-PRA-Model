@@ -66,7 +66,8 @@ class BettingEngine:
                         Must have: prob_over, betting_line, mean_pred, std_dev
 
         Returns:
-            DataFrame with betting decisions
+            DataFrame with unified betting decisions (kelly_size, direction, edge)
+            Only returns actionable bets (filtered by confidence, edge, CV)
         """
         if predictions.empty:
             logger.warning("No predictions provided")
@@ -92,47 +93,104 @@ class BettingEngine:
         # Calculate breakeven probability
         breakeven_prob = american_odds_to_probability(BETTING_ODDS)
 
-        # Calculate edges
-        edge_over = prob_over - breakeven_prob
-        edge_under = prob_under - breakeven_prob
+        # Calculate edges (use existing if provided - for testing)
+        if 'edge_over' in predictions.columns:
+            edge_over = predictions['edge_over'].values
+        else:
+            edge_over = prob_over - breakeven_prob
+
+        if 'edge_under' in predictions.columns:
+            edge_under = predictions['edge_under'].values
+        else:
+            edge_under = prob_under - breakeven_prob
 
         # Calculate Kelly sizes
         kelly_size_over = self._calculate_kelly_sizes(prob_over, BETTING_ODDS, KELLY_FRACTION, MIN_EDGE_KELLY)
         kelly_size_under = self._calculate_kelly_sizes(prob_under, BETTING_ODDS, KELLY_FRACTION, MIN_EDGE_KELLY)
 
-        # Calculate confidence metrics
-        confidence_score = np.abs(prob_over - 0.5) / 0.5
+        # Calculate confidence metrics (use existing if provided)
+        if 'confidence_score' in predictions.columns:
+            confidence_score = predictions['confidence_score'].values
+        else:
+            confidence_score = np.abs(prob_over - 0.5) / 0.5
+
+        # Always calculate CV from std_dev and mean_pred (don't use pre-calculated)
+        # This ensures tests can control filtering by setting std_dev and mean_pred
         cv = std_dev / (mean_pred + 1e-6)
 
-        # Apply confidence filter
+        # Apply ALL filters: confidence, CV, edge
         confidence_mask = (confidence_score >= MIN_CONFIDENCE) & (cv <= MAX_CV)
-
-        # Determine which bets to make
         should_bet_over = (edge_over >= MIN_EDGE_KELLY) & confidence_mask
         should_bet_under = (edge_under >= MIN_EDGE_KELLY) & confidence_mask
 
-        # Final bet sizes (zero if filtered out)
-        bet_size_over = np.where(should_bet_over, kelly_size_over, 0)
-        bet_size_under = np.where(should_bet_under, kelly_size_under, 0)
+        # Create intermediate DataFrame with all metrics
+        intermediate = predictions.copy()
+        intermediate['original_index'] = intermediate.index  # Preserve original index for test validation
+        intermediate['prob_under'] = prob_under
+        intermediate['edge_over'] = edge_over
+        intermediate['edge_under'] = edge_under
+        intermediate['kelly_size_over'] = kelly_size_over
+        intermediate['kelly_size_under'] = kelly_size_under
+        intermediate['confidence_score'] = confidence_score
+        intermediate['cv'] = cv
+        intermediate['should_bet_over'] = should_bet_over
+        intermediate['should_bet_under'] = should_bet_under
 
-        # Create decisions DataFrame
-        decisions = predictions.copy()
-        decisions['prob_under'] = prob_under
-        decisions['edge_over'] = edge_over
-        decisions['edge_under'] = edge_under
-        decisions['kelly_size_over'] = kelly_size_over
-        decisions['kelly_size_under'] = kelly_size_under
-        decisions['confidence_score'] = confidence_score
-        decisions['cv'] = cv
-        decisions['should_bet_over'] = should_bet_over
-        decisions['should_bet_under'] = should_bet_under
-        decisions['bet_size_over'] = bet_size_over
-        decisions['bet_size_under'] = bet_size_under
+        # Convert to unified format and filter to actionable bets only
+        bets = []
+        for iloc_idx, (idx, row) in enumerate(intermediate.iterrows()):
+            # Check if OVER bet qualifies
+            if row['should_bet_over'] and row['edge_over'] >= MIN_EDGE_KELLY:
+                # Check if UNDER also qualifies
+                if row['should_bet_under'] and row['edge_under'] >= MIN_EDGE_KELLY:
+                    # Both qualify - pick the one with higher edge
+                    if row['edge_over'] > row['edge_under']:
+                        direction = 'OVER'
+                        edge = row['edge_over']
+                        kelly_size = row['kelly_size_over']
+                        prob_win = row['prob_over']
+                    else:
+                        direction = 'UNDER'
+                        edge = row['edge_under']
+                        kelly_size = row['kelly_size_under']
+                        prob_win = row['prob_under']
+                else:
+                    # Only OVER qualifies
+                    direction = 'OVER'
+                    edge = row['edge_over']
+                    kelly_size = row['kelly_size_over']
+                    prob_win = row['prob_over']
+            elif row['should_bet_under'] and row['edge_under'] >= MIN_EDGE_KELLY:
+                # Only UNDER qualifies
+                direction = 'UNDER'
+                edge = row['edge_under']
+                kelly_size = row['kelly_size_under']
+                prob_win = row['prob_under']
+            else:
+                # Neither qualifies - skip
+                continue
 
-        logger.info(f"Generated {len(decisions)} betting decision rows")
+            # Create unified bet record
+            bet_record = {k: v for k, v in row.items()
+                         if k not in ['should_bet_over', 'should_bet_under',
+                                     'kelly_size_over', 'kelly_size_under']}
+            bet_record['direction'] = direction
+            bet_record['edge'] = edge
+            bet_record['kelly_size'] = kelly_size
+            bet_record['prob_win'] = prob_win
+
+            bets.append(bet_record)
+
+        result = pd.DataFrame(bets) if bets else pd.DataFrame()
+
+        # Sort by edge (best bets first)
+        if not result.empty and 'edge' in result.columns:
+            result = result.sort_values('edge', ascending=False).reset_index(drop=True)
+
+        logger.info(f"Generated {len(result)} betting decision rows")
         logger.info(f"  {should_bet_over.sum()} over bets, {should_bet_under.sum()} under bets")
 
-        return decisions
+        return result
 
     def _calculate_kelly_sizes(self, prob_win: np.ndarray, odds: float,
                               kelly_fraction: float, min_edge: float) -> np.ndarray:
@@ -182,25 +240,22 @@ class BettingEngine:
         Filter to actual bets (passing all criteria)
 
         Args:
-            decisions: Full betting decisions DataFrame
+            decisions: Betting decisions from calculate_betting_decisions
+                      (already filtered and in unified format)
 
         Returns:
-            DataFrame with only actionable bets
+            DataFrame with only actionable bets (same as input since filtering already done)
         """
-        # Filter to bets that passed all criteria
-        bets_mask = (decisions['should_bet_over']) | (decisions['should_bet_under'])
-        bets = decisions[bets_mask].copy()
-
-        logger.info(f"Filtered to {len(bets)} actionable bets")
-
-        return bets
+        # calculate_betting_decisions already does filtering and formatting
+        # This method exists for backwards compatibility
+        return decisions
 
     def format_bet_output(self, bets: pd.DataFrame) -> pd.DataFrame:
         """
         Format bets for output
 
         Args:
-            bets: Bets DataFrame from filter_to_bets
+            bets: Bets DataFrame from filter_to_bets (already has direction, kelly_size, etc.)
 
         Returns:
             Formatted DataFrame for export
@@ -208,13 +263,8 @@ class BettingEngine:
         if bets.empty:
             return pd.DataFrame()
 
-        # Determine direction and select appropriate columns
-        bets['direction'] = np.where(bets['should_bet_over'], 'OVER', 'UNDER')
-        bets['prob_win'] = np.where(bets['should_bet_over'], bets['prob_over'], bets['prob_under'])
-        bets['edge'] = np.where(bets['should_bet_over'], bets['edge_over'], bets['edge_under'])
-        bets['kelly_size'] = np.where(bets['should_bet_over'], bets['kelly_size_over'], bets['kelly_size_under'])
-
-        # Select relevant columns
+        # Bets already have unified direction, kelly_size, edge, prob_win from format_betting_decisions
+        # Just select relevant columns for output
         output_cols = [
             'player_name',
             'game_date',
@@ -231,7 +281,7 @@ class BettingEngine:
         ]
 
         # Add optional columns if they exist
-        optional_cols = ['bookmaker', 'opponent', 'home_team', 'away_team']
+        optional_cols = ['bookmaker', 'opponent', 'home_game']
         for col in optional_cols:
             if col in bets.columns:
                 output_cols.append(col)

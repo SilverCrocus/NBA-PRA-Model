@@ -93,7 +93,11 @@ def test_model_trainer_train_single_fold(sample_features_df):
     from production.config import XGBOOST_PARAMS
     from xgboost import XGBRegressor
 
-    mean_model = XGBRegressor(**XGBOOST_PARAMS, random_state=42)
+    # Remove early_stopping_rounds and eval_metric from params (pass to fit instead)
+    params = {k: v for k, v in XGBOOST_PARAMS.items()
+              if k not in ['early_stopping_rounds', 'eval_metric']}
+
+    mean_model = XGBRegressor(**params)
     mean_model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
 
     # Check model was trained
@@ -167,7 +171,8 @@ def test_model_trainer_load_training_data():
 
         assert not df.empty
         assert 'game_date' in df.columns
-        assert 'pra' in df.columns
+        # Target column is 'target_pra' in master_features, not 'pra'
+        assert 'target_pra' in df.columns
 
         # Check date range is approximately 3 years
         from datetime import datetime, timedelta

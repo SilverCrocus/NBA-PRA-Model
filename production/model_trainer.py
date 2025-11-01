@@ -115,14 +115,20 @@ class ProductionModelTrainer:
         X = df[feature_cols].copy()
         y = df[target_col].copy()
 
+        # Drop object/string columns (XGBoost can't handle them)
+        object_cols = X.select_dtypes(include=['object']).columns.tolist()
+        if object_cols:
+            logger.warning(f"Dropping {len(object_cols)} object columns: {object_cols}")
+            X = X.drop(columns=object_cols)
+
         # Store feature names
         self.feature_names = X.columns.tolist()
 
         # Handle missing values (fill with 0)
         X = X.fillna(0)
 
-        logger.info(f"Prepared {len(feature_cols)} features")
-        logger.debug(f"Features: {', '.join(feature_cols[:10])}...")
+        logger.info(f"Prepared {len(X.columns)} features")
+        logger.debug(f"Features: {', '.join(X.columns.tolist()[:10])}...")
 
         return X, y
 

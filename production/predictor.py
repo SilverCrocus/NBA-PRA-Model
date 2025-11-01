@@ -98,18 +98,32 @@ class ProductionPredictor:
             Filtered DataFrame
         """
         initial_count = len(df)
+        filtered = df.copy()
 
         # Filter by career games (if column exists)
-        if 'games_played' in df.columns:
-            df = df[df['games_played'] >= MIN_CAREER_GAMES].copy()
-            logger.info(f"Filtered by career games: {initial_count} → {len(df)}")
+        if 'career_games' in filtered.columns:
+            before = len(filtered)
+            filtered = filtered[filtered['career_games'] >= MIN_CAREER_GAMES].copy()
+            logger.info(f"Filtered by career games ({MIN_CAREER_GAMES}+): {before} → {len(filtered)}")
+        elif 'games_played' in filtered.columns:
+            before = len(filtered)
+            filtered = filtered[filtered['games_played'] >= MIN_CAREER_GAMES].copy()
+            logger.info(f"Filtered by career games ({MIN_CAREER_GAMES}+): {before} → {len(filtered)}")
 
         # Filter by recent activity (if column exists)
-        if 'games_last_30' in df.columns:
-            df = df[df['games_last_30'] >= MIN_RECENT_GAMES].copy()
-            logger.info(f"Filtered by recent games: {initial_count} → {len(df)}")
+        if 'games_last30' in filtered.columns:
+            before = len(filtered)
+            filtered = filtered[filtered['games_last30'] >= MIN_RECENT_GAMES].copy()
+            logger.info(f"Filtered by recent games ({MIN_RECENT_GAMES}+): {before} → {len(filtered)}")
+        elif 'games_last_30' in filtered.columns:
+            before = len(filtered)
+            filtered = filtered[filtered['games_last_30'] >= MIN_RECENT_GAMES].copy()
+            logger.info(f"Filtered by recent games ({MIN_RECENT_GAMES}+): {before} → {len(filtered)}")
 
-        return df
+        if len(filtered) < initial_count:
+            logger.info(f"Total filtering: {initial_count} → {len(filtered)} players")
+
+        return filtered
 
     def prepare_features(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -141,6 +155,24 @@ class ProductionPredictor:
         logger.info(f"Prepared {len(feature_cols)} features for {len(X)} games")
 
         return X, metadata
+
+    def _predict_ensemble(self, X: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Generate ensemble predictions (mean and variance)
+
+        Args:
+            X: Features
+
+        Returns:
+            (mean_predictions, variance_predictions)
+        """
+        # Get mean predictions
+        mean_pred = self.predict_mean(X)
+
+        # Get variance predictions (if available)
+        var_pred = self.predict_variance(X) if ENABLE_MONTE_CARLO and self.variance_models else None
+
+        return mean_pred, var_pred
 
     def predict_mean(self, X: pd.DataFrame) -> np.ndarray:
         """
