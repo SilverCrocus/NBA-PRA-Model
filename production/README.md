@@ -47,7 +47,7 @@ ODDS_API_FREE_KEY=your_api_key_here
 ### 3. Train Initial Models
 
 ```bash
-nba-pra train
+uv run nba-pra train
 ```
 
 **Training time:** ~3-5 minutes (19 folds, 3 years of data)
@@ -58,10 +58,10 @@ nba-pra train
 
 ```bash
 # Complete daily pipeline (data → features → training → predictions)
-nba-pra pipeline --full
+uv run nba-pra pipeline --full
 
 # Or run just predictions (if data/features are current)
-nba-pra predict
+uv run nba-pra predict
 ```
 
 **What the full pipeline does:**
@@ -83,33 +83,35 @@ nba-pra predict
 
 ```bash
 # Top 10 bets with 5% minimum edge
-nba-pra recommend --min-edge 0.05 --min-confidence 0.7
+uv run nba-pra recommend --min-edge 0.05 --min-confidence 0.7
 
 # Check system status
-nba-pra status
+uv run nba-pra status
 ```
 
 ---
 
 ## New CLI Commands (v2.0.0)
 
-The production system now uses a unified CLI with the following commands:
+The production system now uses a unified CLI with the following commands.
+
+**Note:** Prefix all commands with `uv run` (or activate the virtual environment first with `source .venv/bin/activate`)
 
 ### `nba-pra predict`
 Generate predictions for upcoming games.
 
 ```bash
 # Default (tomorrow's games)
-nba-pra predict
+uv run nba-pra predict
 
 # Specific date
-nba-pra predict --date 2024-11-01
+uv run nba-pra predict --date 2024-11-01
 
 # Skip training (use cached model)
-nba-pra predict --skip-training
+uv run nba-pra predict --skip-training
 
 # Dry run (preview)
-nba-pra predict --dry-run
+uv run nba-pra predict --dry-run
 ```
 
 ### `nba-pra train`
@@ -117,10 +119,10 @@ Train production models.
 
 ```bash
 # Train 19-fold ensemble
-nba-pra train
+uv run nba-pra train
 
 # Custom configuration
-nba-pra train --cv-folds 19 --training-window 3
+uv run nba-pra train --cv-folds 19 --training-window 3
 ```
 
 ### `nba-pra recommend`
@@ -128,13 +130,13 @@ Recommend top bets based on edge and confidence.
 
 ```bash
 # Default (top 10 with 5% edge)
-nba-pra recommend
+uv run nba-pra recommend
 
 # Custom filters
-nba-pra recommend --min-edge 0.07 --min-confidence 0.8 --top-n 5
+uv run nba-pra recommend --min-edge 0.07 --min-confidence 0.8 --top-n 5
 
 # Specific date
-nba-pra recommend --date 2024-11-01
+uv run nba-pra recommend --date 2024-11-01
 ```
 
 ### `nba-pra pipeline`
@@ -142,19 +144,19 @@ Run complete daily pipeline.
 
 ```bash
 # Full pipeline (data + features + training + predictions)
-nba-pra pipeline --full
+uv run nba-pra pipeline --full
 
 # Skip specific steps
-nba-pra pipeline --skip-data-update
-nba-pra pipeline --skip-feature-engineering
-nba-pra pipeline --skip-training
+uv run nba-pra pipeline --skip-data-update
+uv run nba-pra pipeline --skip-feature-engineering
+uv run nba-pra pipeline --skip-training
 ```
 
 ### `nba-pra status`
 Show production system status.
 
 ```bash
-nba-pra status
+uv run nba-pra status
 ```
 
 Displays:
