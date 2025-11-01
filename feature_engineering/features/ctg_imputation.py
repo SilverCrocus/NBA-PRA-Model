@@ -112,8 +112,10 @@ def create_imputation_flags(df: pd.DataFrame) -> pd.DataFrame:
 
     features = create_feature_base(df)
 
-    # Flag 1: Has CTG data for current game (usage_rate is primary CTG feature)
-    features['has_ctg_data'] = df['usage_rate'].notna().astype(int)
+    # Flag 1: Has CTG data for current game (usage or usage_rate is primary CTG feature)
+    # Check for both column names since CTG data has 'usage' but features may have 'usage_rate'
+    usage_col = 'usage_rate' if 'usage_rate' in df.columns else 'usage'
+    features['has_ctg_data'] = df[usage_col].notna().astype(int) if usage_col in df.columns else 0
 
     # Flag 2: Is rookie (no prior season CTG data available)
     # Detect by checking if current season maps to a previous season
@@ -127,9 +129,9 @@ def create_imputation_flags(df: pd.DataFrame) -> pd.DataFrame:
 
     # Flag 3: Number of PRIOR seasons with CTG history (prevents leakage)
     # Uses .shift(1) to exclude current season from count
-    if 'player_id' in df.columns:
+    if 'player_id' in df.columns and usage_col in df.columns:
         features['ctg_seasons_available'] = (
-            df.groupby('player_id')['usage_rate']
+            df.groupby('player_id')[usage_col]
             .transform(lambda x: x.notna().shift(1).expanding().sum())
             .fillna(0)
             .astype(int)

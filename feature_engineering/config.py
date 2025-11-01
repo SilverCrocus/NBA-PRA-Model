@@ -118,6 +118,7 @@ DEFAULT_REST_DAYS: int = 3
 # CTG Season Mapping (current season → previous season for CTG lookup)
 # Prevents temporal leakage by using only historical CTG data
 CTG_SEASON_MAPPING = {
+    '2025-26': '2024-25',  # Added for new season data
     '2024-25': '2023-24',
     '2023-24': '2022-23',
     '2022-23': '2021-22',

@@ -42,8 +42,8 @@ def check_temporal_leakage(df: pd.DataFrame, filename: str) -> bool:
     """Check for potential temporal leakage"""
     issues = []
 
-    # Check if data is sorted
-    if not df['game_date'].equals(df['game_date'].sort_values()):
+    # Check if data is sorted by comparing values (not indices)
+    if not df['game_date'].is_monotonic_increasing:
         issues.append("Data not sorted by game_date")
 
     # Check for any columns that might indicate leakage

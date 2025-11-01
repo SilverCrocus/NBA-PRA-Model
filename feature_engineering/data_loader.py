@@ -25,9 +25,12 @@ NBA_API_DIR.mkdir(exist_ok=True)
 
 
 def get_all_players() -> pd.DataFrame:
-    """Get list of all NBA players"""
-    all_players = players.get_players()
-    return pd.DataFrame(all_players)
+    """Get list of all active NBA players"""
+    # Use get_active_players() instead of get_players() to avoid fetching
+    # retired players who won't have data for current season
+    active_players = players.get_active_players()
+    logger.info(f"Found {len(active_players)} active NBA players")
+    return pd.DataFrame(active_players)
 
 
 def fetch_player_game_logs(
@@ -101,7 +104,7 @@ def fetch_all_player_gamelogs(
 
     logger.info(f"Fetching game logs for {len(all_players_df)} players across {len(seasons)} seasons...")
 
-    for _, player in tqdm(all_players_df.iterrows(), total=len(all_players_df)):
+    for idx, (_, player) in enumerate(tqdm(all_players_df.iterrows(), total=len(all_players_df)), 1):
         player_id = player['id']
         player_name = player['full_name']
 
@@ -111,6 +114,9 @@ def fetch_all_player_gamelogs(
             gamelogs['PLAYER_NAME'] = player_name
             gamelogs['PLAYER_ID'] = player_id
             all_gamelogs.append(gamelogs)
+            logger.info(f"[{idx}/{len(all_players_df)}] {player_name}: {len(gamelogs)} games found")
+        else:
+            logger.debug(f"[{idx}/{len(all_players_df)}] {player_name}: No games found")
 
     if all_gamelogs:
         combined = pd.concat(all_gamelogs, ignore_index=True)
@@ -130,6 +136,10 @@ def clean_nba_api_data(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         Cleaned DataFrame with standardized columns
     """
+    # Convert game_id to int64 to match existing data format
+    if 'Game_ID' in df.columns:
+        df['Game_ID'] = pd.to_numeric(df['Game_ID'], errors='coerce').astype('Int64')
+
     # Convert game date to datetime
     df['GAME_DATE'] = pd.to_datetime(df['GAME_DATE'])
 
@@ -313,22 +323,55 @@ def load_player_gamelogs(filename: str = 'player_games.parquet') -> pd.DataFrame
 def main() -> None:
     """
     Main function to fetch and save NBA API data
-    Run this to collect the base dataset
+    Implements incremental loading - only fetches new games since last update
     """
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('logs/data_loader.log'),
+            logging.StreamHandler()
+        ]
+    )
+
     # Define seasons to fetch (adjust as needed)
-    # 10 seasons: 2024-25 (current) + 9 historical seasons back to 2015-16
+    # Only fetching 2025-26 season (historical data already exists)
     seasons = [
-        '2024-25', '2023-24', '2022-23', '2021-22', '2020-21',
-        '2019-20', '2018-19', '2017-18', '2016-17', '2015-16'
+        '2025-26'
     ]
 
-    logger.info("Starting NBA API data collection...")
-    logger.info("This will take several hours due to rate limiting (2 sec per request)")
+    logger.info("="*80)
+    logger.info("Starting NBA API data collection (incremental mode)...")
+    logger.info(f"Target season: {seasons}")
+    logger.info(f"Current date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("="*80)
+
+    # Check if existing data exists
+    existing_data = None
+    latest_date = None
+    output_path = NBA_API_DIR / 'player_games.parquet'
+
+    if output_path.exists():
+        logger.info(f"Loading existing data from {output_path}")
+        existing_data = pd.read_parquet(output_path)
+
+        # Find latest date for the target season
+        season_data = existing_data[existing_data['season'] == '2025-26']
+        if not season_data.empty:
+            latest_date = pd.to_datetime(season_data['game_date']).max()
+            logger.info(f"Latest game date in existing 2025-26 data: {latest_date}")
+        else:
+            logger.info("No 2025-26 season data found in existing file")
+    else:
+        logger.info("No existing data found - will fetch full season")
+
     logger.info(f"Fetching seasons: {', '.join(seasons)}")
+    logger.info("This may take several hours due to rate limiting (2 sec per request)")
 
     # For testing, set sample_size to a small number (e.g., 10)
     # For production, set to None to fetch all players
-    SAMPLE_SIZE = None  # Testing with 10 players
+    SAMPLE_SIZE = None
 
     # Fetch data
     gamelogs = fetch_all_player_gamelogs(seasons, sample_size=SAMPLE_SIZE)
@@ -337,13 +380,52 @@ def main() -> None:
         # Clean and standardize
         gamelogs = clean_nba_api_data(gamelogs)
 
+        # Filter to only new games if we have existing data
+        if latest_date is not None:
+            initial_count = len(gamelogs)
+            gamelogs = gamelogs[gamelogs['game_date'] > latest_date]
+            logger.info(f"Filtered to {len(gamelogs)} new games (after {latest_date.date()})")
+            logger.info(f"Excluded {initial_count - len(gamelogs)} existing games")
+
+            if gamelogs.empty:
+                logger.info("No new games to add - data is up to date!")
+                return
+
+        # Merge with existing data if it exists
+        if existing_data is not None:
+            logger.info(f"Merging {len(gamelogs)} new games with {len(existing_data)} existing games")
+            combined_data = pd.concat([existing_data, gamelogs], ignore_index=True)
+
+            # Remove any potential duplicates (by player_id, game_id, game_date)
+            initial_combined = len(combined_data)
+            combined_data = combined_data.drop_duplicates(
+                subset=['player_id', 'game_id', 'game_date'],
+                keep='last'
+            ).reset_index(drop=True)
+
+            if initial_combined > len(combined_data):
+                logger.info(f"Removed {initial_combined - len(combined_data)} duplicate games")
+
+            # Sort by player and date
+            combined_data = combined_data.sort_values(['player_id', 'game_date']).reset_index(drop=True)
+
+            gamelogs = combined_data
+
         # Save to parquet
         save_player_gamelogs(gamelogs)
 
         logger.info(f"\nData collection complete!")
-        logger.info(f"Total games: {len(gamelogs)}")
+        logger.info(f"Total games in dataset: {len(gamelogs)}")
         logger.info(f"Total players: {gamelogs['player_id'].nunique()}")
         logger.info(f"Date range: {gamelogs['game_date'].min()} to {gamelogs['game_date'].max()}")
+
+        # Show 2025-26 season stats
+        season_2025_data = gamelogs[gamelogs['season'] == '2025-26']
+        if not season_2025_data.empty:
+            logger.info(f"\n2025-26 Season stats:")
+            logger.info(f"  Games: {len(season_2025_data)}")
+            logger.info(f"  Players: {season_2025_data['player_id'].nunique()}")
+            logger.info(f"  Date range: {season_2025_data['game_date'].min()} to {season_2025_data['game_date'].max()}")
     else:
         logger.info("No data collected!")
 
