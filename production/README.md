@@ -4,8 +4,8 @@
 
 Production deployment for daily NBA player PRA (Points + Rebounds + Assists) predictions with Monte Carlo probabilistic forecasting and Kelly criterion bet sizing.
 
-**Version:** 1.0.0
-**Date:** 2025-10-31
+**Version:** 2.0.0
+**Date:** 2025-11-01
 
 ---
 
@@ -28,12 +28,12 @@ Based on backtesting results:
 
 ---
 
-## Quick Start
+## Quick Start (NEW CLI - v2.0.0)
 
 ### 1. Install Dependencies
 
 ```bash
-# Ensure uv is installed
+# Install with uv
 uv sync
 ```
 
@@ -41,14 +41,13 @@ uv sync
 
 Update `.env` file with your free TheOddsAPI key:
 ```bash
-ODDS_API_FREE_KEY=5100c18e74058e57c1d33a747e8c2be1
+ODDS_API_FREE_KEY=your_api_key_here
 ```
 
 ### 3. Train Initial Models
 
 ```bash
-cd /Users/diyagamah/Documents/NBA_PRA
-PYTHONPATH=/Users/diyagamah/Documents/NBA_PRA uv run python production/model_trainer.py
+nba-pra train
 ```
 
 **Training time:** ~3-5 minutes (19 folds, 3 years of data)
@@ -57,13 +56,15 @@ PYTHONPATH=/Users/diyagamah/Documents/NBA_PRA uv run python production/model_tra
 
 **🎯 RECOMMENDED: Single-Command Workflow**
 
-This matches your backtest methodology (daily retraining with latest data):
-
 ```bash
-PYTHONPATH=/Users/diyagamah/Documents/NBA_PRA uv run python production/run_full_pipeline.py --auto-fetch-data
+# Complete daily pipeline (data → features → training → predictions)
+nba-pra pipeline --full
+
+# Or run just predictions (if data/features are current)
+nba-pra predict
 ```
 
-**What this does:**
+**What the full pipeline does:**
 1. ✅ Fetches latest NBA game logs automatically
 2. ✅ Regenerates all features (~5-10 min)
 3. ✅ **Retrains models with new data** (~3-5 min)
@@ -78,35 +79,144 @@ PYTHONPATH=/Users/diyagamah/Documents/NBA_PRA uv run python production/run_full_
 - Training only takes 3-5 minutes (worth it!)
 - Captures latest player form, injuries, lineup changes
 
-#### **Alternative Options**
-
-**Option A: Manual Control** (if you prefer step-by-step):
+### 5. View Recommendations
 
 ```bash
-# Step 1: Fetch NBA data
-uv run feature_engineering/data_loader.py
+# Top 10 bets with 5% minimum edge
+nba-pra recommend --min-edge 0.05 --min-confidence 0.7
 
-# Step 2: Run full pipeline (skip data fetch since you just ran it)
-PYTHONPATH=/Users/diyagamah/Documents/NBA_PRA uv run python production/run_full_pipeline.py --skip-data-update
+# Check system status
+nba-pra status
 ```
 
-**Option B: Quick Test** (predictions only, no data/features/training updates):
+---
+
+## New CLI Commands (v2.0.0)
+
+The production system now uses a unified CLI with the following commands:
+
+### `nba-pra predict`
+Generate predictions for upcoming games.
 
 ```bash
-PYTHONPATH=/Users/diyagamah/Documents/NBA_PRA uv run python production/run_daily.py --skip-training
+# Default (tomorrow's games)
+nba-pra predict
+
+# Specific date
+nba-pra predict --date 2024-11-01
+
+# Skip training (use cached model)
+nba-pra predict --skip-training
+
+# Dry run (preview)
+nba-pra predict --dry-run
 ```
 
-**Other useful flags:**
+### `nba-pra train`
+Train production models.
+
 ```bash
-# Skip training (NOT recommended for daily use - only for testing)
-uv run python production/run_full_pipeline.py --auto-fetch-data --skip-training
+# Train 19-fold ensemble
+nba-pra train
 
-# Specify date
-uv run python production/run_full_pipeline.py --auto-fetch-data --date 2025-11-01
-
-# Skip everything except predictions (testing only)
-uv run python production/run_full_pipeline.py --skip-data-update --skip-feature-engineering --skip-training
+# Custom configuration
+nba-pra train --cv-folds 19 --training-window 3
 ```
+
+### `nba-pra recommend`
+Recommend top bets based on edge and confidence.
+
+```bash
+# Default (top 10 with 5% edge)
+nba-pra recommend
+
+# Custom filters
+nba-pra recommend --min-edge 0.07 --min-confidence 0.8 --top-n 5
+
+# Specific date
+nba-pra recommend --date 2024-11-01
+```
+
+### `nba-pra pipeline`
+Run complete daily pipeline.
+
+```bash
+# Full pipeline (data + features + training + predictions)
+nba-pra pipeline --full
+
+# Skip specific steps
+nba-pra pipeline --skip-data-update
+nba-pra pipeline --skip-feature-engineering
+nba-pra pipeline --skip-training
+```
+
+### `nba-pra status`
+Show production system status.
+
+```bash
+nba-pra status
+```
+
+Displays:
+- Latest model information
+- Recent predictions
+- Betting ledger summary
+
+---
+
+## Migration Guide (v1.0 → v2.0)
+
+### OLD vs NEW Commands
+
+```bash
+# OLD (v1.0)
+PYTHONPATH=/path/to/NBA_PRA uv run python production/run_daily.py
+
+# NEW (v2.0)
+nba-pra predict
+
+# ──────────────────────────────────────────────────
+
+# OLD
+PYTHONPATH=/path/to/NBA_PRA uv run python production/run_full_pipeline.py --auto-fetch-data
+
+# NEW
+nba-pra pipeline --full
+
+# ──────────────────────────────────────────────────
+
+# OLD
+PYTHONPATH=/path/to/NBA_PRA uv run python production/model_trainer.py
+
+# NEW
+nba-pra train
+
+# ──────────────────────────────────────────────────
+
+# OLD
+PYTHONPATH=/path/to/NBA_PRA uv run python production/recommend_bets.py --min-edge 0.05
+
+# NEW
+nba-pra recommend --min-edge 0.05
+```
+
+### Benefits of v2.0 CLI
+
+✅ **No PYTHONPATH required** - CLI handles imports automatically
+✅ **Shorter commands** - `nba-pra predict` vs long paths
+✅ **Unified interface** - Single entry point for all operations
+✅ **Better help** - `nba-pra --help` shows all commands
+✅ **Improved error handling** - Consistent logging and exceptions
+
+### Legacy Scripts (Deprecated)
+
+The following scripts still work but are **deprecated** and will be removed in v3.0:
+
+- `production/run_daily.py` → Use `nba-pra predict`
+- `production/run_full_pipeline.py` → Use `nba-pra pipeline`
+- `production/recommend_bets.py` → Use `nba-pra recommend`
+
+All legacy scripts now show deprecation warnings.
 
 ---
 

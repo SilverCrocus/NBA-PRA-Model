@@ -1,16 +1,43 @@
 """
 Daily Production Pipeline Orchestrator
 
-Main script to run daily NBA PRA prediction and betting workflow.
+⚠️ DEPRECATED: This script is deprecated as of v2.0.0 and will be removed in v3.0.0
 
-Usage:
-    python production/run_daily.py [--skip-training] [--skip-odds] [--date YYYY-MM-DD]
+Use the new unified CLI instead:
+    OLD: PYTHONPATH=/path/to/NBA_PRA uv run python production/run_daily.py
+    NEW: nba-pra predict
+
+Migration guide:
+    python production/run_daily.py --skip-training
+    →  nba-pra predict --skip-training
+
+    python production/run_daily.py --date 2024-11-01
+    →  nba-pra predict --date 2024-11-01
+
+For more information, see production/README.md or docs/production_architecture.md
 
 Author: NBA PRA Prediction System
 Date: 2025-10-31
 """
 
 import argparse
+import warnings
+
+# Show deprecation warning
+warnings.warn(
+    "\n\n"
+    "=" * 80 + "\n"
+    "⚠️  DEPRECATION WARNING\n"
+    "=" * 80 + "\n"
+    "This script (run_daily.py) is deprecated and will be removed in v3.0.0\n\n"
+    "Please use the new unified CLI instead:\n"
+    "  OLD: PYTHONPATH=/path uv run python production/run_daily.py\n"
+    "  NEW: nba-pra predict\n\n"
+    "See production/README.md for migration guide.\n"
+    "=" * 80 + "\n",
+    DeprecationWarning,
+    stacklevel=2
+)
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys

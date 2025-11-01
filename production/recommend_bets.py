@@ -1,18 +1,46 @@
 """
 Bet Recommendation Script
 
-Analyzes predictions CSV and recommends the best bets based on:
-- Edge thresholds
-- Confidence levels
-- Volatility limits
+⚠️ DEPRECATED: This script is deprecated as of v2.0.0 and will be removed in v3.0.0
 
-Usage:
-    python production/recommend_bets.py
-    python production/recommend_bets.py --date 2025-11-01
-    python production/recommend_bets.py --min-edge 0.05 --min-confidence 0.7
+Use the new unified CLI instead:
+    OLD: PYTHONPATH=/path/to/NBA_PRA uv run python production/recommend_bets.py
+    NEW: nba-pra recommend
+
+Migration guide:
+    python production/recommend_bets.py --min-edge 0.05
+    →  nba-pra recommend --min-edge 0.05
+
+    python production/recommend_bets.py --min-confidence 0.7
+    →  nba-pra recommend --min-confidence 0.7
+
+    python production/recommend_bets.py --top-n 5
+    →  nba-pra recommend --top-n 5
+
+For more information, see production/README.md or docs/production_architecture.md
+
+Author: NBA PRA Prediction System
+Date: 2025-10-31
 """
 
 import pandas as pd
+import warnings
+
+# Show deprecation warning
+warnings.warn(
+    "\n\n"
+    "=" * 80 + "\n"
+    "⚠️  DEPRECATION WARNING\n"
+    "=" * 80 + "\n"
+    "This script (recommend_bets.py) is deprecated and will be removed in v3.0.0\n\n"
+    "Please use the new unified CLI instead:\n"
+    "  OLD: PYTHONPATH=/path uv run python production/recommend_bets.py\n"
+    "  NEW: nba-pra recommend\n\n"
+    "See production/README.md for migration guide.\n"
+    "=" * 80 + "\n",
+    DeprecationWarning,
+    stacklevel=2
+)
 import argparse
 from pathlib import Path
 from datetime import datetime, timedelta

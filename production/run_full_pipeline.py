@@ -1,46 +1,46 @@
 """
 Full Production Pipeline
 
-Runs complete workflow: data update → feature engineering → model training → predictions
+⚠️ DEPRECATED: This script is deprecated as of v2.0.0 and will be removed in v3.0.0
 
-This is a wrapper script that orchestrates:
-1. Update NBA data (fetch latest game logs from NBA API)
-2. Regenerate features (run feature engineering pipeline)
-3. Train models and generate predictions (run production pipeline)
+Use the new unified CLI instead:
+    OLD: PYTHONPATH=/path/to/NBA_PRA uv run python production/run_full_pipeline.py --auto-fetch-data
+    NEW: nba-pra pipeline --full
 
-RECOMMENDED DAILY WORKFLOW (matches backtest methodology):
+Migration guide:
     python production/run_full_pipeline.py --auto-fetch-data
+    →  nba-pra pipeline --full
 
-This will:
-    - Fetch latest NBA data automatically
-    - Regenerate all features
-    - Retrain models (3-5 minutes)
-    - Generate predictions and bets
+    python production/run_full_pipeline.py --skip-data-update
+    →  nba-pra pipeline --skip-data-update
 
-Usage:
-    python production/run_full_pipeline.py [options]
+    python production/run_full_pipeline.py --skip-training
+    →  nba-pra pipeline --skip-training
 
-    --auto-fetch-data        Automatically fetch latest NBA data (RECOMMENDED)
-    --skip-data-update       Skip data fetching (if data already current)
-    --skip-feature-engineering   Skip feature regeneration
-    --skip-training          Skip model retraining (use cached model)
-    --date YYYY-MM-DD        Target date for predictions (default: tomorrow)
-
-Examples:
-    # Daily production run (RECOMMENDED)
-    python production/run_full_pipeline.py --auto-fetch-data
-
-    # Weekly with full retraining
-    python production/run_full_pipeline.py --auto-fetch-data
-
-    # Quick test (skip everything except predictions)
-    python production/run_full_pipeline.py --skip-data-update --skip-feature-engineering --skip-training
+For more information, see production/README.md or docs/production_architecture.md
 
 Author: NBA PRA Prediction System
 Date: 2025-10-31
 """
 
 import argparse
+import warnings
+
+# Show deprecation warning
+warnings.warn(
+    "\n\n"
+    "=" * 80 + "\n"
+    "⚠️  DEPRECATION WARNING\n"
+    "=" * 80 + "\n"
+    "This script (run_full_pipeline.py) is deprecated and will be removed in v3.0.0\n\n"
+    "Please use the new unified CLI instead:\n"
+    "  OLD: PYTHONPATH=/path uv run python production/run_full_pipeline.py --auto-fetch-data\n"
+    "  NEW: nba-pra pipeline --full\n\n"
+    "See production/README.md for migration guide.\n"
+    "=" * 80 + "\n",
+    DeprecationWarning,
+    stacklevel=2
+)
 import subprocess
 import sys
 from pathlib import Path
