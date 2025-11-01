@@ -375,6 +375,18 @@ def calculate_features(df: pd.DataFrame, windows: List[int] = [5, 10]) -> pd.Dat
 
 **Standards applied:** Type hints (68 functions), input validation (33 functions), logging system, specific exceptions, comprehensive docstrings.
 
+### Feature Module Save Pattern
+
+All feature modules MUST sort by grain before saving:
+
+```python
+# Save features (REQUIRED: sort first for temporal validation)
+features = features.sort_values(['player_id', 'game_date'])
+features.to_parquet(output_path)
+```
+
+**Why:** Validation enforces per-player monotonic game_date ordering to prevent temporal leakage. Either sort order is acceptable: `['player_id', 'game_date']` (preferred for consistency with grain) or `['game_date', 'player_id']` (used by rolling_features), as long as each player's games are chronologically ordered.
+
 ## Testing Infrastructure
 
 **72 tests, 100% pass rate** in `tests/` directory.
