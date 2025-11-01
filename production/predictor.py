@@ -36,8 +36,7 @@ from production.upcoming_games_fetcher import get_upcoming_game_features
 if ENABLE_MONTE_CARLO:
     from production.monte_carlo import (
         fit_gamma_parameters,
-        calculate_probability_over_line,
-        calculate_std_dev
+        calculate_probability_over_line
     )
 
 logger = setup_logging('predictor')

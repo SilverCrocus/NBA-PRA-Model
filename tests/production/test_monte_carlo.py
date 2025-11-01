@@ -6,9 +6,9 @@ import numpy as np
 from production.monte_carlo import (
     fit_gamma_parameters,
     calculate_probability_over_line,
-    calculate_std_dev,
     calculate_bet_edge,
-    american_odds_to_probability
+    american_odds_to_probability,
+    calculate_kelly_fraction
 )
 
 
@@ -104,3 +104,35 @@ def test_calculate_bet_edge():
     # Negative edge when prob_win < breakeven
     edge_negative = calculate_bet_edge(0.45, -110)
     assert edge_negative < 0
+
+
+def test_calculate_kelly_fraction():
+    """Test Kelly criterion bet sizing"""
+    # Standard bet with positive edge
+    prob_win = 0.65
+    odds = -110
+    kelly_frac = 0.25  # Quarter Kelly
+
+    bet_size = calculate_kelly_fraction(prob_win, odds, kelly_frac)
+
+    # Should return positive bet size
+    assert bet_size > 0
+
+    # Should be reasonable fraction of bankroll (< 10%)
+    assert bet_size < 0.1
+
+    # Should be approximately 6.63% for these inputs (quarter Kelly)
+    assert abs(bet_size - 0.0663) < 0.005
+
+    # Test with negative edge (should return 0)
+    bet_size_negative = calculate_kelly_fraction(0.45, -110, kelly_frac)
+    assert bet_size_negative == 0.0
+
+    # Test with positive odds (underdog)
+    bet_size_underdog = calculate_kelly_fraction(0.55, 200, kelly_frac)
+    assert bet_size_underdog > 0
+
+    # Test with full Kelly (higher bet size)
+    bet_size_full = calculate_kelly_fraction(prob_win, odds, kelly_fraction=1.0)
+    assert bet_size_full > bet_size
+    assert bet_size_full == pytest.approx(bet_size * 4, rel=0.01)

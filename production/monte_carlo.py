@@ -46,22 +46,6 @@ def fit_gamma_parameters(mean: float, variance: float) -> Tuple[float, float]:
     return alpha, beta
 
 
-def calculate_std_dev(variance: float) -> float:
-    """
-    Calculate standard deviation from variance.
-
-    Args:
-        variance: Variance value
-
-    Returns:
-        Standard deviation
-    """
-    if variance < 0:
-        raise ValueError(f"Variance cannot be negative, got {variance}")
-
-    return np.sqrt(variance)
-
-
 def calculate_probability_over_line(
     mean: float,
     std_dev: float,
